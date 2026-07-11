@@ -1417,8 +1417,11 @@
 
     <div class="modal-actions" style="margin-top:10px">
       <button class="modal-btn modal-btn-cancel" id="settingsReset">恢复默认</button>
+      <button class="modal-btn modal-btn-cancel" id="settingsExport">导出配置</button>
+      <button class="modal-btn modal-btn-cancel" id="settingsImport">导入配置</button>
       <button class="modal-btn modal-btn-primary" id="settingsClose">完成</button>
     </div>
+    <input type="file" id="settingsImportFile" accept="application/json,.json" style="display:none">
   </div>
 </div>
 
@@ -1586,6 +1589,41 @@
       showToast('配置未能写入浏览器存储，请减少自定义壁纸大小后重试');
       return false;
     }
+  }
+
+  function exportConfiguration() {
+    const storage = {};
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith(STORAGE_PREFIX)) storage[key] = localStorage.getItem(key);
+    }
+    const payload = JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), storage }, null, 2);
+    const url = URL.createObjectURL(new Blob([payload], { type: 'application/json' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'my-navigation-config.json';
+    link.click();
+    URL.revokeObjectURL(url);
+    showToast('配置已导出');
+  }
+
+  function importConfiguration(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = event => {
+      try {
+        const payload = JSON.parse(event.target.result);
+        if (!payload || payload.version !== 1 || !payload.storage || typeof payload.storage !== 'object') throw new Error('invalid');
+        Object.entries(payload.storage).forEach(([key, value]) => {
+          if (key.startsWith(STORAGE_PREFIX) && typeof value === 'string') localStorage.setItem(key, value);
+        });
+        showToast('配置已导入，正在应用');
+        setTimeout(() => location.reload(), 500);
+      } catch {
+        showToast('无效的配置文件');
+      }
+    };
+    reader.readAsText(file);
   }
 
   // Load all settings
@@ -2576,6 +2614,12 @@
   $('btnSettings').addEventListener('click', openSettings);
   $('settingsClose').addEventListener('click', () => { el.settingsOverlay.classList.remove('show'); updateBodyScrollLock(); });
   $('settingsReset').addEventListener('click', resetDefaults);
+  $('settingsExport').addEventListener('click', exportConfiguration);
+  $('settingsImport').addEventListener('click', () => $('settingsImportFile').click());
+  $('settingsImportFile').addEventListener('change', event => {
+    importConfiguration(event.target.files[0]);
+    event.target.value = '';
+  });
   el.settingsOverlay.addEventListener('click', e => { if(e.target===el.settingsOverlay) { el.settingsOverlay.classList.remove('show'); updateBodyScrollLock(); } });
 
   const DEFAULT_STATE = {
