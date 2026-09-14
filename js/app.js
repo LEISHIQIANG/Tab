@@ -17,6 +17,7 @@
     el.heroClockSub = $('heroClockSub');
     el.heroDate = $('heroDate');
     el.greeting = $('greeting');
+    el.searchSuggest = $('searchSuggest');
     el.editModalOverlay = $('editModalOverlay');
     el.catModalOverlay = $('catModalOverlay');
     el.settingsOverlay = $('settingsOverlay');
@@ -53,11 +54,118 @@
   }
   applyInvertClockColor(state.invertClockColor);
 
-  // ── Bottom Status Bar & IP Geolocation ──
+  // ── Bottom Status Bar & Multi-Source IP Geolocation ──
+  const IP_CACHE_KEY = 'nav2_ip_cache';
   let _ipFetchLock = false;
-  async function fetchIpInfo(force = false) {
+  let _lastIpFetchTime = 0;
+  const IP_THROTTLE_MS = 3500; // 3.5秒防抖节流，避免高频切屏引起请求风暴
+
+  // 权威多源池：涵盖国内直连与全球顶级 CDN，全部支持跨域 CORS
+  const IP_RICH_SOURCES = [
+    {
+      name: 'UserAgentInfo',
+      url: 'https://ip.useragentinfo.com/json',
+      parse: d => (d && d.ip ? {
+        ip: d.ip,
+        location: [d.country, d.province, d.city].filter(Boolean).join(' · ') || d.country || '-',
+        isp: d.isp || '-'
+      } : null)
+    },
+    {
+      name: 'IPWhoIs',
+      url: 'https://ipwho.is/?lang=zh-CN',
+      parse: d => (d && d.success && d.ip ? {
+        ip: d.ip,
+        location: [d.country, d.region, d.city].filter(Boolean).join(' · ') || d.country || '-',
+        isp: (d.connection && d.connection.isp) || '-'
+      } : null)
+    },
+    {
+      name: 'IPSb',
+      url: 'https://api.ip.sb/geoip',
+      parse: d => (d && d.ip ? {
+        ip: d.ip,
+        location: [d.country, d.region, d.city].filter(Boolean).join(' · ') || d.country || '-',
+        isp: d.isp || d.organization || '-'
+      } : null)
+    },
+    {
+      name: 'IPApiCo',
+      url: 'https://ipapi.co/json/',
+      parse: d => (d && d.ip ? {
+        ip: d.ip,
+        location: [d.country_name, d.region, d.city].filter(Boolean).join(' · ') || d.country_name || '-',
+        isp: d.org || '-'
+      } : null)
+    },
+    {
+      name: 'VoreIP',
+      url: 'https://api.vore.top/api/IPdata',
+      parse: d => (d && d.ip ? {
+        ip: d.ip,
+        location: [d.ipdata?.info1, d.ipdata?.info2].filter(Boolean).join(' · ') || '-',
+        isp: d.ipdata?.isp || '-'
+      } : null)
+    }
+  ];
+
+  // 极速纯 IP 兜底池
+  const IP_FALLBACK_SOURCES = [
+    {
+      name: 'IdentMe',
+      url: 'https://v4.ident.me/.json',
+      parse: d => (d && d.ip ? { ip: d.ip, location: '公网节点', isp: '-' } : null)
+    },
+    {
+      name: 'IPify',
+      url: 'https://api64.ipify.org?format=json',
+      parse: d => (d && d.ip ? { ip: d.ip, location: '公网节点', isp: '-' } : null)
+    }
+  ];
+
+  async function querySingleIpSource(source, timeoutMs = 2800) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const resp = await fetch(source.url, {
+        signal: controller.signal,
+        headers: { 'Accept': 'application/json' },
+        cache: 'no-cache'
+      });
+      clearTimeout(timer);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      const result = source.parse(data);
+      if (!result || !result.ip) throw new Error('Invalid payload');
+      return result;
+    } catch (err) {
+      clearTimeout(timer);
+      throw err;
+    }
+  }
+
+  async function raceAllIpSources() {
+    // 优先 5 大全信息源并发竞速，毫秒级谁先到用谁
+    try {
+      return await Promise.any(IP_RICH_SOURCES.map(src => querySingleIpSource(src, 3000)));
+    } catch (e) {
+      // 若全信息源在当前网络环境下全部受阻，极速兜底纯 IP 源
+      try {
+        return await Promise.any(IP_FALLBACK_SOURCES.map(src => querySingleIpSource(src, 2500)));
+      } catch (err) {
+        throw new Error('All IP sources failed');
+      }
+    }
+  }
+
+  async function fetchIpInfo(options = {}) {
+    const { force = false, silent = false } = (typeof options === 'boolean' ? { force: options } : options);
     if (!state.showStatusBar) return;
-    if (_ipFetchLock && !force) return;
+
+    const now = Date.now();
+    // 节流控制：非强制刷新时，冷却时间内直接跳过
+    if (!force && (now - _lastIpFetchTime < IP_THROTTLE_MS)) return;
+    if (_ipFetchLock) return;
     _ipFetchLock = true;
 
     const ipEl = $('statusIp');
@@ -65,98 +173,76 @@
     const ispEl = $('statusIsp');
     const dotEl = document.querySelector('.bottom-status-bar .status-dot');
     const netStateEl = $('statusNetState');
+    const refreshBtn = $('btnRefreshIp');
 
-    if (dotEl) { dotEl.className = 'status-dot loading'; }
-    if (netStateEl) netStateEl.textContent = '检测中';
-    if (ipEl) ipEl.textContent = '正在获取...';
+    if (refreshBtn) refreshBtn.classList.add('spinning');
+    const spinStartTime = Date.now();
 
-    // 检查是否有较新鲜的本地缓存 (15分钟)
-    const CACHE_KEY = 'nav2_ip_cache';
-    try {
-      const cached = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null');
-      if (cached && !force && (Date.now() - cached.time < 15 * 60 * 1000)) {
-        renderIpData(cached.data);
-        _ipFetchLock = false;
-        return;
-      }
-    } catch {}
+    const currentIpText = ipEl ? ipEl.textContent.trim() : '';
+    const hasExistingData = currentIpText && currentIpText !== '正在获取...' && currentIpText !== '获取失败' && currentIpText !== '获取中...';
 
-    function renderIpData(info) {
+    // 只有在无任何数据且非静默刷新时，才显示“正在获取...”
+    if (!hasExistingData && !silent) {
+      if (dotEl) dotEl.className = 'status-dot loading';
+      if (netStateEl) netStateEl.textContent = '检测中';
+      if (ipEl) ipEl.textContent = '正在获取...';
+    }
+
+    function renderIpData(info, isUpdated = false) {
       if (ipEl) ipEl.textContent = info.ip || '未知';
       if (geoEl) geoEl.textContent = info.location || '-';
       if (ispEl) ispEl.textContent = info.isp || '-';
-      if (dotEl) { dotEl.className = 'status-dot'; }
+      if (dotEl) dotEl.className = 'status-dot';
       if (netStateEl) netStateEl.textContent = '在线';
+      if (isUpdated && ipEl) {
+        ipEl.classList.remove('ip-updated-flash');
+        void ipEl.offsetWidth;
+        ipEl.classList.add('ip-updated-flash');
+      }
     }
 
-    // 尝试主服务：ip.sb
-    let resolved = false;
+    // 1. SWR 策略：若本地有缓存且无显示内容，0ms 先渲染缓存呈现
+    let cachedData = null;
     try {
-      const res = await fetch('https://api.ip.sb/geoip', { signal: AbortSignal.timeout(3500) });
-      if (res.ok) {
-        const d = await res.json();
-        if (d && d.ip) {
-          const locParts = [d.country, d.region, d.city].filter(Boolean);
-          const data = {
-            ip: d.ip,
-            location: locParts.join(' · ') || d.country || '-',
-            isp: d.isp || d.organization || '-'
-          };
-          renderIpData(data);
-          try { localStorage.setItem(CACHE_KEY, JSON.stringify({ time: Date.now(), data })); } catch {}
-          resolved = true;
+      const cached = JSON.parse(localStorage.getItem(IP_CACHE_KEY) || 'null');
+      if (cached && cached.data) {
+        cachedData = cached.data;
+        if (!hasExistingData) {
+          renderIpData(cachedData);
         }
       }
     } catch {}
 
-    // 备用服务1：ipwho.is
-    if (!resolved) {
-      try {
-        const res = await fetch('https://ipwho.is/', { signal: AbortSignal.timeout(3500) });
-        if (res.ok) {
-          const d = await res.json();
-          if (d && d.success && d.ip) {
-            const locParts = [d.country, d.region, d.city].filter(Boolean);
-            const data = {
-              ip: d.ip,
-              location: locParts.join(' · ') || d.country || '-',
-              isp: (d.connection && d.connection.isp) || '-'
-            };
-            renderIpData(data);
-            try { localStorage.setItem(CACHE_KEY, JSON.stringify({ time: Date.now(), data })); } catch {}
-            resolved = true;
-          }
-        }
-      } catch {}
-    }
+    // 2. 并发竞速请求最新数据
+    try {
+      const freshData = await raceAllIpSources();
+      _lastIpFetchTime = Date.now();
 
-    // 备用服务2：ipinfo.io
-    if (!resolved) {
-      try {
-        const res = await fetch('https://ipinfo.io/json', { signal: AbortSignal.timeout(3500) });
-        if (res.ok) {
-          const d = await res.json();
-          if (d && d.ip) {
-            const locParts = [d.country, d.region, d.city].filter(Boolean);
-            const data = {
-              ip: d.ip,
-              location: locParts.join(' · ') || d.country || '-',
-              isp: d.org || '-'
-            };
-            renderIpData(data);
-            try { localStorage.setItem(CACHE_KEY, JSON.stringify({ time: Date.now(), data })); } catch {}
-            resolved = true;
-          }
-        }
-      } catch {}
-    }
+      const isChanged = !cachedData || cachedData.ip !== freshData.ip || cachedData.location !== freshData.location;
+      renderIpData(freshData, isChanged && hasExistingData);
 
-    if (!resolved) {
-      if (ipEl) ipEl.textContent = '获取失败';
-      if (dotEl) { dotEl.className = 'status-dot offline'; }
-      if (netStateEl) netStateEl.textContent = '离线/受限';
+      try {
+        localStorage.setItem(IP_CACHE_KEY, JSON.stringify({ time: Date.now(), data: freshData }));
+      } catch {}
+
+      if (isChanged && hasExistingData && force) {
+        showToast('IP 已刷新: ' + freshData.ip);
+      }
+    } catch (err) {
+      if (!hasExistingData && !cachedData) {
+        if (ipEl) ipEl.textContent = '获取失败';
+        if (dotEl) dotEl.className = 'status-dot offline';
+        if (netStateEl) netStateEl.textContent = '离线/受限';
+      }
+    } finally {
+      if (refreshBtn) {
+        const elapsed = Date.now() - spinStartTime;
+        const minSpinMs = 650;
+        const remain = Math.max(0, minSpinMs - elapsed);
+        setTimeout(() => refreshBtn.classList.remove('spinning'), remain);
+      }
+      _ipFetchLock = false;
     }
-    _ipFetchLock = false;
   }
 
   function applyStatusBarVisibility(show) {
@@ -165,24 +251,59 @@
     if (bar) {
       bar.style.display = state.showStatusBar ? 'block' : 'none';
       if (state.showStatusBar) {
-        fetchIpInfo();
+        // 打开/显示状态栏时，立即用缓存呈现并在后台静默竞速刷新
+        fetchIpInfo({ silent: true, force: true });
       }
     }
   }
   applyStatusBarVisibility(state.showStatusBar);
 
+  // ── 自动感知刷新：切换到此网页、页面重新聚焦、网络恢复时无缝自动刷新 ──
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && state.showStatusBar) {
+      fetchIpInfo({ silent: true });
+    }
+  });
+
+  window.addEventListener('focus', () => {
+    if (state.showStatusBar) {
+      fetchIpInfo({ silent: true });
+    }
+  });
+
+  window.addEventListener('online', () => {
+    if (state.showStatusBar) {
+      fetchIpInfo({ force: true });
+      showToast('网络已恢复在线');
+    }
+  });
+
+  window.addEventListener('offline', () => {
+    const dotEl = document.querySelector('.bottom-status-bar .status-dot');
+    const netStateEl = $('statusNetState');
+    if (dotEl) dotEl.className = 'status-dot offline';
+    if (netStateEl) netStateEl.textContent = '已断网';
+  });
+
+  // 每 5 分钟在页面处于活跃状态时自动静默刷新一次
+  setInterval(() => {
+    if (document.visibilityState === 'visible' && state.showStatusBar) {
+      fetchIpInfo({ silent: true });
+    }
+  }, 5 * 60 * 1000);
+
   // 绑定状态栏点击互动：点击 IP 快速复制，点击刷新按钮重新获取
   $('statusIpWrap')?.addEventListener('click', () => {
     const ip = $('statusIp')?.textContent;
-    if (ip && ip !== '正在获取...' && ip !== '获取失败') {
+    if (ip && ip !== '正在获取...' && ip !== '获取失败' && ip !== '获取中...') {
       navigator.clipboard?.writeText(ip).then(() => showToast('IP 已复制: ' + ip));
     } else {
-      fetchIpInfo(true);
+      fetchIpInfo({ force: true });
     }
   });
   $('btnRefreshIp')?.addEventListener('click', e => {
     e.stopPropagation();
-    fetchIpInfo(true);
+    fetchIpInfo({ force: true });
   });
 
   function applyMinimalMode(enabled, animate = true) {
@@ -373,14 +494,21 @@
     }
 
     const hr = n.getHours();
-    if (el.greeting) el.greeting.textContent = hr<6||hr>=18?'晚上好':hr<12?'早上好':'下午好';
+    if (el.greeting) {
+      if (hr >= 5 && hr < 9) el.greeting.textContent = '清晨好 ☕';
+      else if (hr >= 9 && hr < 12) el.greeting.textContent = '上午好 ☀️';
+      else if (hr >= 12 && hr < 14) el.greeting.textContent = '中午好 🍴';
+      else if (hr >= 14 && hr < 19) el.greeting.textContent = '下午好 🌤️';
+      else if (hr >= 19 && hr < 24) el.greeting.textContent = '晚上好 🌙';
+      else el.greeting.textContent = '夜深了 🌌';
+    }
   }
   updateClock(); setInterval(updateClock, 1000);
 
   // ── Search Engine ──
   function updateEngineUI() {
     const e = engines[state.engine];
-    el.searchInput.placeholder = '在 '+e.label+' 上搜索...';
+    el.searchInput.placeholder = '在 '+e.label+' 上搜索，或输入书签直达...';
     document.querySelectorAll('.se-btn').forEach(b => b.classList.toggle('active', b.dataset.engine===state.engine));
     
     const btn = $('btnEngine');
@@ -400,16 +528,182 @@
     state.engine = b.dataset.engine;
     updateEngineUI(); save('engine', state.engine);
   }));
+
+  // ── Local Bookmarks Search Suggestion & Keyboard Nav ──
+  let _suggestSelectedIndex = -1;
+  let _currentSuggestions = [];
+
+  function escapeHtml(str) {
+    return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function renderSearchSuggestions(kw) {
+    if (!el.searchSuggest) return;
+    const trimmed = (kw || '').trim().toLowerCase();
+    if (!trimmed) {
+      el.searchSuggest.style.display = 'none';
+      el.searchSuggest.innerHTML = '';
+      _currentSuggestions = [];
+      _suggestSelectedIndex = -1;
+      return;
+    }
+
+    const matched = [];
+    for (const bm of bookmarks) {
+      const name = (bm.name || '').toLowerCase();
+      const url = (bm.url || '').toLowerCase();
+      const cat = (bm.category || '').toLowerCase();
+      const domain = getDomain(bm.url).toLowerCase();
+
+      let score = 0;
+      if (name === trimmed) score += 200;
+      else if (name.startsWith(trimmed)) score += 100;
+      else if (name.includes(trimmed)) score += 50;
+
+      if (domain.startsWith(trimmed)) score += 80;
+      else if (domain.includes(trimmed)) score += 40;
+      else if (url.includes(trimmed)) score += 20;
+
+      if (cat.includes(trimmed)) score += 15;
+
+      if (score > 0) {
+        matched.push({ bm, score, domain });
+      }
+    }
+
+    matched.sort((a, b) => b.score - a.score);
+    _currentSuggestions = matched.slice(0, 6).map(m => m.bm);
+
+    if (_currentSuggestions.length === 0) {
+      el.searchSuggest.style.display = 'none';
+      el.searchSuggest.innerHTML = '';
+      _suggestSelectedIndex = -1;
+      return;
+    }
+
+    _suggestSelectedIndex = -1;
+    let html = '';
+
+    _currentSuggestions.forEach((bm, idx) => {
+      const fd = bm.display_domain || getDomain(bm.url);
+      const cached = NavIconCache.getSync(fd);
+      const ic = (cached && cached.dataUrl) ? cached.dataUrl : (bm.icon || '');
+      const rawName = bm.name || fd;
+      const escapedKw = trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const highlightedName = escapeHtml(rawName).replace(new RegExp('(' + escapedKw + ')', 'gi'), '<mark>$1</mark>');
+
+      const imgHtml = ic
+        ? '<img src="' + ic + '" alt="" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\';">'
+        : '';
+      const fallbackStyle = ic ? ' style="display:none;background:' + domainColor(fd) + '"' : ' style="background:' + domainColor(fd) + '"';
+
+      html += '<a class="suggest-item" data-index="' + idx + '" href="' + bm.url + '" target="' + (state.openTargetBlank !== false ? '_blank' : '_self') + '" rel="noopener noreferrer">'
+        + '<div class="suggest-icon">'
+        + imgHtml
+        + '<div class="suggest-fallback"' + fallbackStyle + '>' + domainInitial(fd) + '</div>'
+        + '</div>'
+        + '<div class="suggest-info">'
+        + '<div class="suggest-title">' + highlightedName + '</div>'
+        + '<div class="suggest-domain">' + fd + '</div>'
+        + '</div>'
+        + '<div class="suggest-meta">'
+        + (bm.category ? '<span class="suggest-cat">' + escapeHtml(bm.category) + '</span>' : '')
+        + '</div>'
+        + '</a>';
+    });
+
+    el.searchSuggest.innerHTML = html;
+    el.searchSuggest.style.display = 'block';
+    el.searchWrap?.classList.add('has-suggest');
+
+    el.searchSuggest.querySelectorAll('.suggest-item').forEach(item => {
+      item.addEventListener('mouseenter', () => {
+        _suggestSelectedIndex = parseInt(item.dataset.index, 10);
+        updateSuggestHighlight();
+      });
+      item.addEventListener('click', () => {
+        el.searchSuggest.style.display = 'none';
+        el.searchWrap?.classList.remove('has-suggest');
+      });
+    });
+  }
+
+  function updateSuggestHighlight() {
+    if (!el.searchSuggest) return;
+    const items = el.searchSuggest.querySelectorAll('.suggest-item');
+    items.forEach((item, idx) => {
+      item.classList.toggle('selected', idx === _suggestSelectedIndex);
+      if (idx === _suggestSelectedIndex) {
+        item.scrollIntoView({ block: 'nearest' });
+      }
+    });
+  }
+
+  function hideSearchSuggestions() {
+    if (el.searchSuggest) {
+      el.searchSuggest.style.display = 'none';
+      el.searchSuggest.innerHTML = '';
+    }
+    el.searchWrap?.classList.remove('has-suggest');
+    _currentSuggestions = [];
+    _suggestSelectedIndex = -1;
+  }
+
   el.searchInput.addEventListener('keydown', e => {
-    if (e.key==='Enter') doSearch();
-    if (e.key==='Escape') { el.searchInput.value=''; el.searchClear.classList.remove('visible'); el.searchInput.blur(); el.searchInput.closest('.search-box')?.classList.remove('has-input'); }
+    if (e.key === 'ArrowDown') {
+      if (_currentSuggestions.length > 0) {
+        e.preventDefault();
+        _suggestSelectedIndex = (_suggestSelectedIndex + 1) % _currentSuggestions.length;
+        updateSuggestHighlight();
+      }
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      if (_currentSuggestions.length > 0) {
+        e.preventDefault();
+        _suggestSelectedIndex = (_suggestSelectedIndex - 1 + _currentSuggestions.length) % _currentSuggestions.length;
+        updateSuggestHighlight();
+      }
+      return;
+    }
+    if (e.key === 'Enter') {
+      if (_suggestSelectedIndex >= 0 && _currentSuggestions[_suggestSelectedIndex]) {
+        e.preventDefault();
+        const selectedBm = _currentSuggestions[_suggestSelectedIndex];
+        window.open(selectedBm.url, state.openTargetBlank !== false ? '_blank' : '_self');
+        hideSearchSuggestions();
+        return;
+      }
+      doSearch();
+      hideSearchSuggestions();
+      return;
+    }
+    if (e.key === 'Escape') {
+      if (el.searchSuggest && el.searchSuggest.style.display !== 'none') {
+        hideSearchSuggestions();
+        return;
+      }
+      el.searchInput.value = '';
+      el.searchClear.classList.remove('visible');
+      el.searchInput.blur();
+      el.searchInput.closest('.search-box')?.classList.remove('has-input');
+      renderSearchSuggestions('');
+    }
   });
+
   el.searchInput.addEventListener('input', onSearchInput);
   el.searchClear.addEventListener('click', () => {
-    el.searchInput.value='';
+    el.searchInput.value = '';
     el.searchInput.focus();
     el.searchClear.classList.remove('visible');
     el.searchInput.closest('.search-box')?.classList.remove('has-input');
+    renderSearchSuggestions('');
+  });
+
+  document.addEventListener('click', e => {
+    if (el.searchSuggest && el.searchWrap && !el.searchWrap.contains(e.target)) {
+      hideSearchSuggestions();
+    }
   });
 
   function doSearch() {
@@ -423,6 +717,7 @@
     el.searchClear.classList.toggle('visible', kw.length > 0);
     const box = el.searchInput.closest('.search-box');
     if (box) box.classList.toggle('has-input', kw.length > 0);
+    renderSearchSuggestions(kw);
   }
 
   function groupByCategory(list) {
@@ -1221,6 +1516,15 @@
     sliderClusterBlur:    { get:()=>state.clusterBlur,     set:v=>{state.clusterBlur=v; save('clusterBlur',v); applyLayout();}, fmt:v=>v+'px' },
   };
 
+  function updateSliderFill(slider) {
+    if (!slider) return;
+    const min = parseFloat(slider.min) || 0;
+    const max = parseFloat(slider.max) || 100;
+    const val = parseFloat(slider.value);
+    const pct = Math.max(0, Math.min(100, ((val - min) / (max - min)) * 100));
+    slider.style.background = `linear-gradient(to right, var(--accent) 0%, var(--accent) ${pct}%, rgba(103,119,153,0.18) ${pct}%, rgba(103,119,153,0.18) 100%)`;
+  }
+
   Object.entries(sliders).forEach(([id, cfg]) => {
     const slider = $(id);
     const valEl = $('val'+id.replace('slider',''));
@@ -1230,10 +1534,12 @@
       const v = parseFloat(slider.value);
       cfg.set(v);
       if (valEl) valEl.textContent = cfg.fmt(v);
+      updateSliderFill(slider);
     });
     slider.addEventListener('change', () => {
       const v = parseFloat(slider.value);
       cfg.set(v);
+      updateSliderFill(slider);
     });
   });
 
@@ -1242,7 +1548,10 @@
       const slider = $(id);
       const valEl = $('val'+id.replace('slider',''));
       const v = cfg.get();
-      if (slider) slider.value = v;
+      if (slider) {
+        slider.value = v;
+        updateSliderFill(slider);
+      }
       if (valEl) valEl.textContent = cfg.fmt(v);
     });
   }

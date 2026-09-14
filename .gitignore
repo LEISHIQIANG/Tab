@@ -2,3 +2,10 @@ node_modules/
 .playwright-cli/
 .workbuddy/
 *.tmp
+
+# Server deployment & sensitive credential files
+deploy.py
+一键部署到服务器.bat
+*.key
+*.pem
+.env*

@@ -8,12 +8,12 @@
 <link rel="icon" type="image/png" sizes="32x32" href="assets/site-logo-32.png">
 <link rel="apple-touch-icon" sizes="180x180" href="assets/site-logo-180.png">
 <link rel="preload" as="image" href="assets/site-logo-180.png">
-<link rel="preload" as="script" href="bookmarks.js?v=20260914_1">
-<link rel="preload" as="script" href="js/config.js?v=20260914_1">
-<link rel="preload" as="script" href="js/cache.js?v=20260914_1">
-<link rel="preload" as="script" href="js/state.js?v=20260914_1">
-<link rel="preload" as="script" href="js/app.js?v=20260914_1">
-<link rel="stylesheet" href="css/style.css?v=20260914_1">
+<link rel="preload" as="script" href="bookmarks.js?v=20260914_9">
+<link rel="preload" as="script" href="js/config.js?v=20260914_9">
+<link rel="preload" as="script" href="js/cache.js?v=20260914_9">
+<link rel="preload" as="script" href="js/state.js?v=20260914_9">
+<link rel="preload" as="script" href="js/app.js?v=20260914_9">
+<link rel="stylesheet" href="css/style.css?v=20260914_9">
 </head>
 <body>
 
@@ -29,10 +29,19 @@
 
 <!-- ═══ Top Bar ═══ -->
 <div class="top-bar">
-  <div class="top-left"></div>
+  <div class="top-left">
+    <div class="site-brand" id="siteBrand" title="轻航导航">
+      <img class="site-logo" src="assets/site-logo-32.png" alt="Logo">
+      <span class="site-name">轻航</span>
+      <span class="greeting-badge" id="greeting">你好</span>
+    </div>
+  </div>
   <div class="top-right">
-    <button class="top-btn" id="btnTheme" title="主题">
+    <button class="top-btn" id="btnTheme" title="切换主题">
       <!-- Theme icon injected by js -->
+    </button>
+    <button class="top-btn" id="btnSettings" title="自定义设置">
+      <svg class="top-btn-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
     </button>
   </div>
 </div>
@@ -48,10 +57,11 @@
       <button class="search-engine-btn" id="btnEngine" title="切换搜索引擎">
         <img class="se-icon-img" src="icons/google.com.ico" alt="Google">
       </button>
-      <input type="text" class="search-input" id="searchInput" placeholder="搜索网络..." autocomplete="off">
+      <input type="text" class="search-input" id="searchInput" placeholder="搜索网络或书签..." autocomplete="off">
       <span class="search-shortcut-badge" id="searchShortcutBadge">Ctrl K</span>
       <button class="search-clear" id="searchClear" aria-label="清空搜索"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
     </div>
+    <div class="search-suggest" id="searchSuggest" style="display:none"></div>
     <div class="search-engines">
       <button class="se-btn active" data-engine="google">
         <img class="se-icon-img" src="icons/google.com.ico" alt="Google">
@@ -85,7 +95,7 @@
   </div>
 </div>
 
-<!-- ═══ Category Tabs ═══
+<!-- ═══ Category Tabs ═══ -->
 
 <!-- ═══ Main Content ═══ -->
 <div class="main-content" id="mainContent"></div>
@@ -115,8 +125,8 @@
       <span class="status-label">运营商:</span>
       <span class="status-val" id="statusIsp">-</span>
     </div>
-    <button class="status-btn-refresh" id="btnRefreshIp" title="刷新网络与 IP 信息">
-      <svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+    <button class="status-btn-refresh" id="btnRefreshIp" title="刷新网络与 IP 信息" aria-label="刷新网络与 IP">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.85.83 6.72 2.24L21 7"/><path d="M21 3v4h-4"/></svg>
     </button>
   </div>
 </div>
@@ -535,10 +545,10 @@
 <!-- ═══ Toast ═══ -->
 <div class="toast" id="toast"></div>
 
-<script src="bookmarks.js?v=20260914_1"></script>
-<script src="js/config.js?v=20260914_1"></script>
-<script src="js/cache.js?v=20260914_1"></script>
-<script src="js/state.js?v=20260914_1"></script>
-<script src="js/app.js?v=20260914_1"></script>
+<script src="bookmarks.js?v=20260914_9"></script>
+<script src="js/config.js?v=20260914_9"></script>
+<script src="js/cache.js?v=20260914_9"></script>
+<script src="js/state.js?v=20260914_9"></script>
+<script src="js/app.js?v=20260914_9"></script>
 </body>
 </html>
