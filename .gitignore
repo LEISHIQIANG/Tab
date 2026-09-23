@@ -9,3 +9,6 @@ deploy.py
 *.key
 *.pem
 .env*
+
+# ZCode local workspace artifacts
+.zcode/

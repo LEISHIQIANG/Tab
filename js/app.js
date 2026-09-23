@@ -31,19 +31,25 @@
   function domainInitial(d) { const p=d.split('.'); const n=p.length>1?p[p.length-2]:d; return (n[0]||'?').toUpperCase(); }
 
 
-  // ── Apply Theme (Solar / Lunar SVG injection) ──
+  // ── Apply Theme（light / dark / auto 跟随系统）──
+  const mqlDark = window.matchMedia('(prefers-color-scheme: dark)');
+  const THEME_LABELS = { auto: '跟随系统', light: '浅色', dark: '深色' };
+  const THEME_ICON_SUN = `<svg class="se-svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>`;
+  const THEME_ICON_MOON = `<svg class="se-svg" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>`;
+  const THEME_ICON_AUTO = `<svg class="se-svg" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/><line x1="7" y1="10" x2="17" y2="10"/></svg>`;
   function applyTheme(t) {
-    state.theme = t;
-    document.documentElement.setAttribute('data-theme', t);
+    state.theme = (t === 'auto' || t === 'dark' || t === 'light') ? t : 'light';
+    const resolved = state.theme === 'auto' ? (mqlDark.matches ? 'dark' : 'light') : state.theme;
+    document.documentElement.setAttribute('data-theme', resolved);
     const btn = $('btnTheme');
     if (btn) {
-      if (t === 'dark') {
-        btn.innerHTML = `<svg class="se-svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>`;
-      } else {
-        btn.innerHTML = `<svg class="se-svg" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>`;
-      }
+      btn.innerHTML = state.theme === 'auto' ? THEME_ICON_AUTO : (resolved === 'dark' ? THEME_ICON_SUN : THEME_ICON_MOON);
+      btn.title = '主题：' + THEME_LABELS[state.theme] + '（点击切换）';
     }
   }
+  function onSystemThemeChange() { if (state.theme === 'auto') applyTheme('auto'); }
+  if (mqlDark.addEventListener) mqlDark.addEventListener('change', onSystemThemeChange);
+  else if (mqlDark.addListener) mqlDark.addListener(onSystemThemeChange);
   applyTheme(state.theme);
 
   function applyInvertClockColor(invert) {
@@ -369,17 +375,62 @@
   });
 
   $('btnTheme').addEventListener('click', () => {
-    const n = state.theme==='dark'?'light':'dark';
+    const THEME_CYCLE = { light: 'dark', dark: 'auto', auto: 'light' };
+    const n = THEME_CYCLE[state.theme] || 'light';
     applyTheme(n); save('theme', n);
+    showToast('主题：' + THEME_LABELS[n]);
   });
 
-  // ── Background ──
-  function applyBg(url) {
-    state.bg = url;
+  // ── Background（自定义大图转存 IndexedDB；支持 idb:custom / bing:daily）──
+  function paintBg(url) {
     document.documentElement.style.setProperty('--bg-img', url ? `url("${url}")` : 'none');
     const bgLayer = document.querySelector('.bg-layer');
     if (bgLayer) bgLayer.style.backgroundImage = url ? `url("${url}")` : 'none';
+  }
+  function applyBg(url) {
+    if (url && typeof url === 'string' && url.startsWith('data:')) {
+      // dataURL 壁纸体积大，转存 IndexedDB，localStorage 只留占位标记，避免撑爆配额
+      if (window.WallpaperStore) window.WallpaperStore.set('custom', url);
+      url = 'idb:custom';
+    }
+    state.bg = url;
     save('bg', url);
+    resolveBg();
+  }
+  const BING_CACHE_KEY = 'nav2-bing_daily';
+  function getBingCache() {
+    try { return JSON.parse(localStorage.getItem(BING_CACHE_KEY) || 'null'); } catch { return null; }
+  }
+  function bingToday() {
+    const d = new Date();
+    return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate();
+  }
+  function ensureBingDaily() {
+    const c = getBingCache();
+    if (c && c.date === bingToday() && c.url) return Promise.resolve(c.url);
+    if (!window.fetchBingDaily) return Promise.reject(new Error('no fetcher'));
+    return window.fetchBingDaily().then(url => {
+      try { localStorage.setItem(BING_CACHE_KEY, JSON.stringify({ date: bingToday(), url })); } catch {}
+      return url;
+    });
+  }
+  function resolveBg() {
+    const saved = state.bg;
+    if (saved === 'idb:custom') {
+      if (window.WallpaperStore) {
+        window.WallpaperStore.get('custom').then(d => paintBg(d || window.DEFAULT_STATE.bg));
+      } else {
+        paintBg(window.DEFAULT_STATE.bg);
+      }
+    } else if (saved === 'bing:daily') {
+      const c = getBingCache();
+      if (c && c.url) paintBg(c.url);
+      ensureBingDaily().then(url => {
+        if (state.bg === 'bing:daily') paintBg(url);
+      }).catch(() => { if (!c || !c.url) paintBg(window.DEFAULT_STATE.bg); });
+    } else {
+      paintBg(saved);
+    }
   }
   function applyBlur(v) {
     state.blur = Number(v);
@@ -471,10 +522,29 @@
   const weekDays = ['日','一','二','三','四','五','六'];
   const localOffset = new Date().getTimezoneOffset();
   const isBeijingLike = localOffset <= -420;
-  const isLALike = localOffset >= 360;
-  const subTZ = isBeijingLike ? 'America/Los_Angeles' : 'Asia/Shanghai';
-  const subLabel = isBeijingLike ? '洛杉矶' : '北京';
-  const subFmt = new Intl.DateTimeFormat('en', { timeZone: subTZ, hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
+  const SUB_TZ_OPTIONS = {
+    beijing:     { tz: 'Asia/Shanghai',      label: '北京' },
+    losangeles:  { tz: 'America/Los_Angeles', label: '洛杉矶' },
+    newyork:     { tz: 'America/New_York',    label: '纽约' },
+    london:      { tz: 'Europe/London',       label: '伦敦' },
+    paris:       { tz: 'Europe/Paris',        label: '巴黎' },
+    moscow:      { tz: 'Europe/Moscow',       label: '莫斯科' },
+    dubai:       { tz: 'Asia/Dubai',          label: '迪拜' },
+    tokyo:       { tz: 'Asia/Tokyo',          label: '东京' },
+    sydney:      { tz: 'Australia/Sydney',    label: '悉尼' }
+  };
+  function getSubTZ() {
+    const key = state.clockSubTZ || 'auto';
+    if (key !== 'auto' && SUB_TZ_OPTIONS[key]) return SUB_TZ_OPTIONS[key];
+    return isBeijingLike ? SUB_TZ_OPTIONS.losangeles : SUB_TZ_OPTIONS.beijing;
+  }
+  let _subFmtCache = { tz: '', fmt: null };
+  function getSubFmt(tz) {
+    if (_subFmtCache.tz !== tz) {
+      _subFmtCache = { tz, fmt: new Intl.DateTimeFormat('en', { timeZone: tz, hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }) };
+    }
+    return _subFmtCache.fmt;
+  }
 
   function updateClock() {
     const n = new Date();
@@ -486,9 +556,10 @@
 
     if (state.showClockSub !== false) {
       el.heroClockSub.style.display = '';
-      const subParts = subFmt.formatToParts(n);
+      const sub = getSubTZ();
+      const subParts = getSubFmt(sub.tz).formatToParts(n);
       const subTime = subParts.map(p => p.value).join('');
-      el.heroClockSub.innerHTML = subTime + '<span class="tz-label">' + subLabel + '</span>';
+      el.heroClockSub.innerHTML = subTime + '<span class="tz-label">' + sub.label + '</span>';
     } else {
       el.heroClockSub.style.display = 'none';
     }
@@ -536,6 +607,10 @@
   function escapeHtml(str) {
     return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
+  function cssEscape(v) {
+    if (window.CSS && CSS.escape) return CSS.escape(String(v));
+    return String(v).replace(/["\\\]]/g, '\\$&');
+  }
 
   function renderSearchSuggestions(kw) {
     if (!el.searchSuggest) return;
@@ -574,13 +649,6 @@
     matched.sort((a, b) => b.score - a.score);
     _currentSuggestions = matched.slice(0, 6).map(m => m.bm);
 
-    if (_currentSuggestions.length === 0) {
-      el.searchSuggest.style.display = 'none';
-      el.searchSuggest.innerHTML = '';
-      _suggestSelectedIndex = -1;
-      return;
-    }
-
     _suggestSelectedIndex = -1;
     let html = '';
 
@@ -597,20 +665,32 @@
         : '';
       const fallbackStyle = ic ? ' style="display:none;background:' + domainColor(fd) + '"' : ' style="background:' + domainColor(fd) + '"';
 
-      html += '<a class="suggest-item" data-index="' + idx + '" href="' + bm.url + '" target="' + (state.openTargetBlank !== false ? '_blank' : '_self') + '" rel="noopener noreferrer">'
+      html += '<a class="suggest-item" data-index="' + idx + '" href="' + escapeHtml(bm.url) + '" target="' + (state.openTargetBlank !== false ? '_blank' : '_self') + '" rel="noopener noreferrer">'
         + '<div class="suggest-icon">'
         + imgHtml
-        + '<div class="suggest-fallback"' + fallbackStyle + '>' + domainInitial(fd) + '</div>'
+        + '<div class="suggest-fallback"' + fallbackStyle + '>' + escapeHtml(domainInitial(fd)) + '</div>'
         + '</div>'
         + '<div class="suggest-info">'
         + '<div class="suggest-title">' + highlightedName + '</div>'
-        + '<div class="suggest-domain">' + fd + '</div>'
+        + '<div class="suggest-domain">' + escapeHtml(fd) + '</div>'
         + '</div>'
         + '<div class="suggest-meta">'
         + (bm.category ? '<span class="suggest-cat">' + escapeHtml(bm.category) + '</span>' : '')
         + '</div>'
         + '</a>';
     });
+
+    // 底部固定搜索入口：书签没有命中时也能明确跳转搜索引擎
+    const engLabel = engines[state.engine].label;
+    const engIcon = ENGINE_ICONS[state.engine] || '';
+    html += '<a class="suggest-item suggest-search" data-index="' + _currentSuggestions.length + '" data-search="1">'
+      + '<div class="suggest-icon">'
+      + (engIcon ? '<img src="' + engIcon + '" alt="">' : '')
+      + '</div>'
+      + '<div class="suggest-info">'
+      + '<div class="suggest-title">在 ' + escapeHtml(engLabel) + ' 搜索 "' + escapeHtml(trimmed) + '"</div>'
+      + '</div>'
+      + '</a>';
 
     el.searchSuggest.innerHTML = html;
     el.searchSuggest.style.display = 'block';
@@ -621,7 +701,11 @@
         _suggestSelectedIndex = parseInt(item.dataset.index, 10);
         updateSuggestHighlight();
       });
-      item.addEventListener('click', () => {
+      item.addEventListener('click', e => {
+        if (item.dataset.search) {
+          e.preventDefault();
+          doSearch(true);
+        }
         el.searchSuggest.style.display = 'none';
         el.searchWrap?.classList.remove('has-suggest');
       });
@@ -653,7 +737,7 @@
     if (e.key === 'ArrowDown') {
       if (_currentSuggestions.length > 0) {
         e.preventDefault();
-        _suggestSelectedIndex = (_suggestSelectedIndex + 1) % _currentSuggestions.length;
+        _suggestSelectedIndex = (_suggestSelectedIndex + 1) % (_currentSuggestions.length + 1);
         updateSuggestHighlight();
       }
       return;
@@ -661,7 +745,7 @@
     if (e.key === 'ArrowUp') {
       if (_currentSuggestions.length > 0) {
         e.preventDefault();
-        _suggestSelectedIndex = (_suggestSelectedIndex - 1 + _currentSuggestions.length) % _currentSuggestions.length;
+        _suggestSelectedIndex = (_suggestSelectedIndex - 1 + _currentSuggestions.length + 1) % (_currentSuggestions.length + 1);
         updateSuggestHighlight();
       }
       return;
@@ -706,9 +790,33 @@
     }
   });
 
-  function doSearch() {
+  // 识别"形似网址"的输入：github.com、https://a.b/c、localhost:3000、裸 IP 等直接导航而非搜索
+  function looksLikeDirectUrl(q) {
+    if (!q || /\s/.test(q)) return null;
+    if (/^https?:\/\//i.test(q)) {
+      try { const u = new URL(q); return u.hostname.includes('.') || u.hostname === 'localhost' ? q : null; }
+      catch { return null; }
+    }
+    if (/^localhost(:\d+)?([\/?#]\S*)?$/i.test(q)) return 'http://' + q;
+    if (!/^[a-z0-9][a-z0-9-]*(\.[a-z0-9-]+)+(:\d+)?([\/?#]\S*)?$/i.test(q)) return null;
+    const host = q.split(/[\/?#]/)[0].split(':')[0];
+    const tld = host.split('.').pop();
+    if (!/^[a-z]{2,}$/i.test(tld)) return null; // 排除 "1.5"、"v1.2" 之类的非域名输入
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return 'http://' + q; // 裸 IP
+    return 'https://' + q;
+  }
+  function tryDirectNavigate(q) {
+    const target = looksLikeDirectUrl(q);
+    if (!target) return false;
+    window.open(target, state.openTargetBlank !== false ? '_blank' : '_self');
+    try { showToast('已直达 ' + target.replace(/^https?:\/\//, '').split(/[\/?#]/)[0]); } catch {}
+    return true;
+  }
+
+  function doSearch(forceSearch) {
     const q = el.searchInput.value.trim();
     if (!q) return;
+    if (!forceSearch && tryDirectNavigate(q)) return;
     window.open(engines[state.engine].url + encodeURIComponent(q), '_blank');
   }
 
@@ -845,21 +953,21 @@
     const shortName = shortenName(bm.name, bm.url);
     const hasIcon = Boolean(ic);
     const imgHtml = hasIcon
-      ? '<img src="'+ic+'" loading="lazy" decoding="async" alt="" class="site-icon'+(cachedItem ? ' loaded' : '')+'" onload="this.classList.add(\'loaded\');const fb=this.nextElementSibling;if(fb)fb.style.display=\'none\';" onerror="handleIconError(this, \''+fd+'\')">'
-      : '<img src="" loading="lazy" decoding="async" alt="" class="site-icon" style="display:none" onload="this.classList.add(\'loaded\');const fb=this.nextElementSibling;if(fb)fb.style.display=\'none\';" onerror="handleIconError(this, \''+fd+'\')">';
+      ? '<img src="'+escapeHtml(ic)+'" loading="lazy" decoding="async" alt="" class="site-icon'+(cachedItem ? ' loaded' : '')+'" onload="this.classList.add(\'loaded\');const fb=this.nextElementSibling;if(fb)fb.style.display=\'none\';" onerror="handleIconError(this, \''+fd.replace(/['\\]/g,'')+'\')">'
+      : '<img src="" loading="lazy" decoding="async" alt="" class="site-icon" style="display:none" onload="this.classList.add(\'loaded\');const fb=this.nextElementSibling;if(fb)fb.style.display=\'none\';" onerror="handleIconError(this, \''+fd.replace(/['\\]/g,'')+'\')">';
     const fallbackStyle = (hasIcon && cachedItem) ? ' style="display:none;background:'+domainColor(fd)+'"' : ' style="background:'+domainColor(fd)+'"';
     const targetAttr = state.openTargetBlank !== false ? ' target="_blank" rel="noopener noreferrer"' : ' target="_self"';
-    return '<a class="icon-item" href="'+bm.url+'"'+targetAttr+' draggable="true"'
-      +' data-url="'+bm.url.replace(/"/g,'&quot;')+'"'
-      +' data-name="'+bm.name.replace(/"/g,'&quot;')+'"'
-      +' data-domain="'+fd+'" data-icon="'+(bm.icon||'')+'" data-proxy="'+(bm.needs_proxy?'1':'0')+'"'
-      +' data-cat="'+(bm.category||'其他')+'"'
-      +' title="'+bm.name+'\n'+domain+'">'
-      +'<span class="icon-img-wrap" data-domain="'+fd+'" data-icon="'+(bm.icon||'')+'">'
+    return '<a class="icon-item" href="'+escapeHtml(bm.url)+'"'+targetAttr+' draggable="true"'
+      +' data-url="'+escapeHtml(bm.url)+'"'
+      +' data-name="'+escapeHtml(bm.name)+'"'
+      +' data-domain="'+escapeHtml(fd)+'" data-icon="'+escapeHtml(bm.icon||'')+'" data-proxy="'+(bm.needs_proxy?'1':'0')+'"'
+      +' data-cat="'+escapeHtml(bm.category||'其他')+'"'
+      +' title="'+escapeHtml(bm.name)+'\n'+escapeHtml(domain)+'">'
+      +'<span class="icon-img-wrap" data-domain="'+escapeHtml(fd)+'" data-icon="'+escapeHtml(bm.icon||'')+'">'
       + imgHtml
-      +'<span class="icon-fallback"'+fallbackStyle+'>'+domainInitial(fd)+'</span>'
+      +'<span class="icon-fallback"'+fallbackStyle+'>'+escapeHtml(domainInitial(fd))+'</span>'
       +'</span>'
-      +'<span class="icon-name">'+shortName+'</span></a>';
+      +'<span class="icon-name">'+escapeHtml(shortName)+'</span></a>';
   }
 
   // ── Masonry waterfall layout ──
@@ -954,17 +1062,17 @@
     const gridModeClass = (state.gridMode === 'fluid') ? 'grid-fluid' : 'grid-fixed';
     for (const [cat, items] of groups) {
       const isCollapsed = state.collapsedCats && state.collapsedCats.includes(cat);
-      h += '<div class="cat-cluster ' + gridModeClass + (isCollapsed ? ' collapsed' : '') + '" data-cat="'+cat+'">';
-      
+      h += '<div class="cat-cluster ' + gridModeClass + (isCollapsed ? ' collapsed' : '') + '" data-cat="'+escapeHtml(cat)+'">';
+
       const iconKey = state.catIcons[cat] || 'folder';
       const svgIcon = SVG_ICONS[iconKey] || SVG_ICONS['folder'];
       h += '<div class="cat-header" draggable="true">'
         + '<div class="cat-header-left">'
         + '<div class="cat-icon-badge">' + svgIcon + '</div>'
-        + '<span class="cat-title">' + cat + '</span>'
+        + '<span class="cat-title">' + escapeHtml(cat) + '</span>'
         + '<span class="cat-count">' + items.length + '</span>'
         + '</div>'
-        + '<button type="button" class="cat-collapse-btn" title="' + (isCollapsed ? '展开分类' : '折叠分类') + '" data-cat="' + cat + '">'
+        + '<button type="button" class="cat-collapse-btn" title="' + (isCollapsed ? '展开分类' : '折叠分类') + '" data-cat="' + escapeHtml(cat) + '">'
         + '<svg class="cat-collapse-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>'
         + '</button>'
         + '</div>';
@@ -1180,7 +1288,7 @@
 
   function onCatDragEnd(e) {
     if (state.draggedCat) {
-      const cluster = document.querySelector('.cat-cluster[data-cat="'+state.draggedCat+'"]');
+      const cluster = document.querySelector('.cat-cluster[data-cat="'+cssEscape(state.draggedCat)+'"]');
       if (cluster) cluster.classList.remove('dragging-cat');
     }
     state.draggedCat = null;
@@ -1231,41 +1339,41 @@
   }
 
   function saveBookmarksFromDOM() {
-    const newBookmarks = [];
-    
+    // 收集页面 DOM 顺序的 [分类, URL] 列表，交给 state 层写入 user_diff
+    // （siteOrder 组内顺序 + 跨分类移动），确保拖拽结果在刷新和官方更新后依然持久。
+    const entries = [];
+
     state.catOrder.forEach(cat => {
-      const cluster = el.mainContent.querySelector(`.cat-cluster[data-cat="${cat}"]`);
+      const cluster = el.mainContent.querySelector(`.cat-cluster[data-cat="${cssEscape(cat)}"]`);
       if (!cluster) return;
-      
-      const items = cluster.querySelectorAll('.icon-item');
-      items.forEach(item => {
-        const url = item.dataset.url;
-        const bm = bookmarks.find(b => b.url === url);
-        if (bm) {
-          bm.category = cat;
-          newBookmarks.push(bm);
-        }
+
+      cluster.querySelectorAll('.icon-item').forEach(item => {
+        if (item.dataset.url) entries.push({ category: cat, url: item.dataset.url });
       });
     });
-    
+
     const allClusters = el.mainContent.querySelectorAll('.cat-cluster');
     allClusters.forEach(cluster => {
       const cat = cluster.dataset.cat;
       if (!cat || state.catOrder.includes(cat) || cat === 'search-results') return;
-      
-      const items = cluster.querySelectorAll('.icon-item');
-      items.forEach(item => {
-        const url = item.dataset.url;
-        const bm = bookmarks.find(b => b.url === url);
-        if (bm) {
-          bm.category = cat;
-          newBookmarks.push(bm);
-        }
+
+      cluster.querySelectorAll('.icon-item').forEach(item => {
+        if (item.dataset.url) entries.push({ category: cat, url: item.dataset.url });
       });
     });
 
-    bookmarks = newBookmarks;
-    save('bookmarks', bookmarks);
+    if (typeof commitBookmarksLayout === 'function') {
+      commitBookmarksLayout(entries);
+    } else {
+      // 兜底：极旧缓存下 state 层无新接口时维持旧行为
+      const newBookmarks = [];
+      entries.forEach(en => {
+        const bm = bookmarks.find(b => b.url === en.url);
+        if (bm) { bm.category = en.category; newBookmarks.push(bm); }
+      });
+      bookmarks = newBookmarks;
+      save('bookmarks', bookmarks);
+    }
   }
 
   // ── Global Context Menu ──
@@ -1279,17 +1387,18 @@
     e.preventDefault();
     
     const iconItem = e.target.closest('.icon-item');
-    
+    const cluster = e.target.closest('.cat-cluster');
+
     let x = e.clientX, y = e.clientY;
-    const mw = 180, mh = iconItem ? 170 : 90;
+    const mw = 200, mh = iconItem ? 170 : (cluster ? 250 : 90);
     if (x + mw > window.innerWidth) x = window.innerWidth - mw - 8;
     if (y + mh > window.innerHeight) y = window.innerHeight - mh - 8;
     if (x < 8) x = 8;
     if (y < 8) y = 8;
-    
+
     el.contextMenu.style.left = x + 'px';
     el.contextMenu.style.top = y + 'px';
-    
+
     if (iconItem) {
       state.contextTarget = iconItem;
       state.contextCat = null;
@@ -1297,19 +1406,20 @@
       el.contextMenu.classList.add('mode-icon');
     } else {
       state.contextTarget = null;
-      const cluster = e.target.closest('.cat-cluster');
       state.contextCat = cluster ? cluster.dataset.cat : null;
       el.contextMenu.classList.remove('mode-icon');
       el.contextMenu.classList.add('mode-blank');
     }
-    
+    el.contextMenu.classList.toggle('has-cat', !iconItem && !!state.contextCat);
+
     el.contextMenu.classList.add('show');
   }
 
-  function hideContextMenu() { 
-    el.contextMenu.classList.remove('show'); 
-    state.contextTarget = null; 
-    state.contextCat = null; 
+  function hideContextMenu() {
+    el.contextMenu.classList.remove('show');
+    el.contextMenu.classList.remove('has-cat');
+    state.contextTarget = null;
+    state.contextCat = null;
   }
   
   function updateBodyScrollLock() {
@@ -1339,6 +1449,20 @@
         openAddCatModal();
       } else if (action === 'open-settings') {
         openSettings();
+      } else if (action === 'manage-cat') {
+        if (state.contextCat) openCatManageModal(state.contextCat);
+      } else if (action === 'delete-cat') {
+        const cat = state.contextCat;
+        if (cat) {
+          const count = bookmarks.filter(b => (b.category || '其他') === cat).length;
+          const msg = count > 0
+            ? '删除分类「' + cat + '」？其中 ' + count + ' 个网站将移入「其他」'
+            : '删除空分类「' + cat + '」？';
+          if (confirm(msg)) {
+            const moved = deleteCategory(cat);
+            if (moved >= 0) { renderAll(); showToast('分类已删除'); }
+          }
+        }
       } else if (t) {
         switch(action) {
           case 'open': window.open(t.dataset.url,'_blank'); break;
@@ -1369,13 +1493,20 @@
             }
             break;
           }
-          case 'delete':
-            if(confirm('确定删除 "'+t.dataset.name+'"?')){
-              deleteBookmarkByUrl(t.dataset.url);
-              renderAll();
+          case 'delete': {
+            const token = deleteBookmarkByUrl(t.dataset.url);
+            renderAll();
+            if (token && token.removed) {
+              showToast('已删除「' + (t.dataset.name || token.removed.name || '') + '」', {
+                actionLabel: '撤销',
+                duration: 6000,
+                onAction: () => { undoDeleteBookmark(token); renderAll(); showToast('已恢复'); }
+              });
+            } else {
               showToast('已删除');
             }
             break;
+          }
         }
       }
       hideContextMenu();
@@ -1409,7 +1540,7 @@
   function buildCategorySelect(selected) {
     const sel = $('editCategory');
     sel.innerHTML = state.catOrder.map(c => {
-      return '<option value="'+c+'"'+(c===selected?' selected':'')+'>'+c+'</option>';
+      return '<option value="'+escapeHtml(c)+'"'+(c===selected?' selected':'')+'>'+escapeHtml(c)+'</option>';
     }).join('');
   }
 
@@ -1480,9 +1611,83 @@
     showToast('分类创建成功');
   });
 
+  // ── Manage Category Modal（重命名 / 换图标 / 删除）──
+  let catManageTarget = null;
+  let catManageIcon = 'folder';
+
+  function buildCatIconGrid(selected) {
+    const grid = $('catManageIconGrid');
+    let h = '';
+    Object.keys(SVG_ICONS).forEach(key => {
+      h += '<button type="button" class="cat-icon-cell'+(key===selected?' selected':'')+'" data-icon="'+key+'" title="'+key+'">'+SVG_ICONS[key]+'</button>';
+    });
+    grid.innerHTML = h;
+    grid.querySelectorAll('.cat-icon-cell').forEach(btn => {
+      btn.addEventListener('click', () => {
+        catManageIcon = btn.dataset.icon;
+        grid.querySelectorAll('.cat-icon-cell').forEach(b => b.classList.toggle('selected', b === btn));
+      });
+    });
+  }
+
+  function openCatManageModal(cat) {
+    if (!cat || !state.catOrder.includes(cat)) return;
+    catManageTarget = cat;
+    catManageIcon = state.catIcons[cat] || 'folder';
+    $('catManageName').value = cat;
+    buildCatIconGrid(catManageIcon);
+    $('catManageOverlay').classList.add('show');
+    updateBodyScrollLock();
+    setTimeout(() => $('catManageName').focus(), 60);
+  }
+
+  function closeCatManageModal() {
+    catManageTarget = null;
+    $('catManageOverlay').classList.remove('show');
+    updateBodyScrollLock();
+  }
+
+  $('catManageCancel').addEventListener('click', closeCatManageModal);
+  $('catManageOverlay').addEventListener('click', e => { if (e.target === $('catManageOverlay')) closeCatManageModal(); });
+
+  $('catManageSave').addEventListener('click', () => {
+    if (!catManageTarget) return;
+    const oldName = catManageTarget;
+    const newName = $('catManageName').value.trim();
+    if (!newName) { showToast('请填写分类名称'); return; }
+    if (newName !== oldName && state.catOrder.includes(newName)) { showToast('该分类已存在'); return; }
+    if (newName !== oldName) {
+      if (!renameCategory(oldName, newName)) { showToast('重命名失败，名称可能已存在'); return; }
+    }
+    const finalName = newName || oldName;
+    if ((state.catIcons[finalName] || 'folder') !== catManageIcon) {
+      state.catIcons[finalName] = catManageIcon;
+      save('catIcons', state.catIcons);
+    }
+    closeCatManageModal();
+    renderAll();
+    showToast('分类已更新');
+  });
+
+  $('catManageDelete').addEventListener('click', () => {
+    if (!catManageTarget) return;
+    const cat = catManageTarget;
+    const count = bookmarks.filter(b => (b.category || '其他') === cat).length;
+    const msg = count > 0
+      ? '删除分类「' + cat + '」？其中 ' + count + ' 个网站将移入「其他」'
+      : '删除空分类「' + cat + '」？';
+    if (!confirm(msg)) return;
+    const moved = deleteCategory(cat);
+    if (moved >= 0) {
+      closeCatManageModal();
+      renderAll();
+      showToast('分类已删除');
+    }
+  });
+
   // ── Settings Panel ──
   const sliders = {
-    sliderSize:           { get:()=>state.iconSize,        set:v=>{state.iconSize=v; save('iconSize',v); applyLayout(); renderAll();}, fmt:v=>v+'px' },
+    sliderSize:           { get:()=>state.iconSize,        set:v=>{state.iconSize=v; save('iconSize',v); applyLayout();}, fmt:v=>v+'px' },
     sliderMasonryCols:    { get:()=>state.masonryCols,     set:v=>{state.masonryCols=Math.min(5, Math.max(1, Math.round(v))); save('masonryCols',state.masonryCols); applyLayout(); masonryLayout();}, fmt:v=>v+' 栏' },
     sliderCols:           { get:()=>state.cols,            set:v=>{state.cols=Math.min(6, Math.max(1, Math.round(v))); save('cols',state.cols); applyLayout(); masonryLayout();}, fmt:v=>v+' 列' },
     sliderGridColGap:     { get:()=>state.gridColGap,      set:v=>{state.gridColGap=v; save('gridColGap',v); applyLayout(); masonryLayout();}, fmt:v=>v+'px' },
@@ -1572,6 +1777,60 @@
   });
   el.settingsOverlay.addEventListener('click', e => { if(e.target===el.settingsOverlay) { el.settingsOverlay.classList.remove('show'); updateBodyScrollLock(); } });
 
+  // ── 个人配置文件（跨浏览器本地同步）──
+  function fmtSyncTime(ts) {
+    if (!ts) return '尚未同步';
+    const d = new Date(ts);
+    const p = n => String(n).padStart(2, '0');
+    return `上次同步 ${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  }
+  function refreshConfigFileCard(detail) {
+    if (!window.ConfigFileSync) return;
+    const st = detail || window.ConfigFileSync.getStatus();
+    const badge = $('cfgFileBadge');
+    const time = $('cfgFileSyncTime');
+    const desc = $('cfgFileDesc');
+    const btnLink = $('cfgLinkFile');
+    const btnCreate = $('cfgCreateFile');
+    const btnSync = $('cfgSyncNow');
+    const btnUnlink = $('cfgUnlink');
+    if (!badge || !time) return;
+
+    if (!st.supported) {
+      badge.textContent = '当前浏览器不支持';
+      time.textContent = '';
+      if (btnLink) btnLink.style.display = 'none';
+      if (btnCreate) btnCreate.style.display = 'none';
+      if (btnSync) btnSync.style.display = 'none';
+      if (btnUnlink) btnUnlink.style.display = 'none';
+      if (desc) {
+        desc.textContent = st.reason === 'insecure'
+          ? '本站点当前通过 HTTP 访问，浏览器出于安全策略禁用了本地文件读写能力（需 HTTPS 或 localhost）。线上可先用下方「导出配置 / 导入配置」在各浏览器间迁移；为站点启用 HTTPS 后此功能即可自动开启。'
+          : '当前浏览器（如 Firefox / Safari）不支持本地文件直连，个人配置仍自动保存在本浏览器中，可通过下方「导出配置 / 导入配置」在其他浏览器间迁移。';
+      }
+      return;
+    }
+
+    if (st.linked) {
+      badge.textContent = '已关联 ' + st.fileName;
+      time.textContent = st.pendingAuth ? '等待文件授权（在页面任意处点击一次即可）' : fmtSyncTime(st.lastSyncAt);
+      if (btnLink) { btnLink.style.display = ''; btnLink.textContent = '更换配置文件'; }
+    } else {
+      badge.textContent = '未关联';
+      time.textContent = '配置仅保存在本浏览器';
+      if (btnLink) { btnLink.style.display = ''; btnLink.textContent = '关联已有配置文件'; }
+    }
+    if (btnCreate) btnCreate.style.display = st.linked ? 'none' : '';
+    if (btnSync) btnSync.style.display = st.linked ? '' : 'none';
+    if (btnUnlink) btnUnlink.style.display = st.linked ? '' : 'none';
+    if (detail && detail.message) time.textContent = detail.message;
+  }
+  document.addEventListener('configsyncstatus', e => refreshConfigFileCard(e.detail));
+  $('cfgLinkFile')?.addEventListener('click', () => window.ConfigFileSync && window.ConfigFileSync.link('open'));
+  $('cfgCreateFile')?.addEventListener('click', () => window.ConfigFileSync && window.ConfigFileSync.link('create'));
+  $('cfgSyncNow')?.addEventListener('click', () => window.ConfigFileSync && window.ConfigFileSync.syncNow());
+  $('cfgUnlink')?.addEventListener('click', () => window.ConfigFileSync && window.ConfigFileSync.unlink());
+
   const DEFAULT_STATE = {
     iconSize: 40, cols: 4, blur: 9,
     gridMode: 'fixed', masonryCols: 4,
@@ -1586,6 +1845,7 @@
     hideIconTitles: false,
     showClockSeconds: true,
     showClockSub: true,
+    clockSubTZ: 'auto',
     invertClockColor: false,
     showStatusBar: false,
     collapsedCats: []
@@ -1611,6 +1871,7 @@
     save('hideIconTitles', state.hideIconTitles);
     save('showClockSeconds', state.showClockSeconds);
     save('showClockSub', state.showClockSub);
+    save('clockSubTZ', state.clockSubTZ);
     save('invertClockColor', state.invertClockColor);
     save('showStatusBar', state.showStatusBar);
     save('collapsedCats', state.collapsedCats);
@@ -1621,6 +1882,7 @@
     applyInvertClockColor(state.invertClockColor);
     applyStatusBarVisibility(state.showStatusBar);
     updateClock();
+    updateSubTZUI();
     renderAll(); openSettings();
     showToast('外观与偏好已恢复默认');
   }
@@ -1630,24 +1892,46 @@
     if ($('groupCols')) $('groupCols').style.display = isFixed ? 'block' : 'none';
   }
 
+  function updateSubTZUI() {
+    const g = $('groupSubTZ');
+    if (g) g.style.display = (state.showClockSub !== false) ? 'block' : 'none';
+  }
+
   function openSettings() {
     syncSliders();
+    refreshConfigFileCard();
     if ($('settingOpenTargetBlank')) $('settingOpenTargetBlank').checked = state.openTargetBlank !== false;
     if ($('settingHideIconTitles')) $('settingHideIconTitles').checked = !!state.hideIconTitles;
     if ($('settingClockSeconds')) $('settingClockSeconds').checked = !!state.showClockSeconds;
     if ($('settingClockSub')) $('settingClockSub').checked = state.showClockSub !== false;
     if ($('settingInvertClockColor')) $('settingInvertClockColor').checked = !!state.invertClockColor;
     if ($('settingShowStatusBar')) $('settingShowStatusBar').checked = !!state.showStatusBar;
+    if ($('selectTheme')) {
+      $('selectTheme').value = (state.theme === 'auto' || state.theme === 'dark') ? state.theme : 'light';
+      syncCustomSelect($('selectTheme'));
+    }
+    if ($('selectClockSubTZ')) {
+      $('selectClockSubTZ').value = state.clockSubTZ || 'auto';
+      syncCustomSelect($('selectClockSubTZ'));
+    }
     if ($('selectGridMode')) {
       $('selectGridMode').value = state.gridMode || 'fixed';
       syncCustomSelect($('selectGridMode'));
     }
     updateGridModeUI();
+    updateSubTZUI();
     const revEl = $('syncRevisionLabel');
     if (revEl) revEl.textContent = window.BOOKMARKS_REVISION || '1.0.0';
     buildWallpaperGallery();
     el.settingsOverlay.classList.add('show');
     updateBodyScrollLock();
+    // 有自动备份时展示「恢复上次备份」入口
+    if (window.ConfigFileSync && typeof window.ConfigFileSync.getBackupInfo === 'function') {
+      window.ConfigFileSync.getBackupInfo().then(info => {
+        const btn = $('cfgRestoreBackup');
+        if (btn) btn.style.display = info ? '' : 'none';
+      });
+    }
   }
 
   if ($('selectGridMode')) {
@@ -1658,6 +1942,28 @@
       renderAll();
     });
   }
+
+  if ($('selectTheme')) {
+    $('selectTheme').addEventListener('change', e => {
+      applyTheme(e.target.value);
+      save('theme', state.theme);
+    });
+  }
+
+  if ($('selectClockSubTZ')) {
+    $('selectClockSubTZ').addEventListener('change', e => {
+      state.clockSubTZ = e.target.value || 'auto';
+      save('clockSubTZ', state.clockSubTZ);
+      updateClock();
+    });
+  }
+
+  $('cfgRestoreBackup')?.addEventListener('click', async () => {
+    if (!window.ConfigFileSync || typeof window.ConfigFileSync.restoreLatestBackup !== 'function') return;
+    if (!confirm('将恢复到最近一次自动备份的配置快照，当前配置会被覆盖，继续？')) return;
+    const ok = await window.ConfigFileSync.restoreLatestBackup();
+    if (!ok) showToast('没有可用的备份');
+  });
 
   if ($('settingOpenTargetBlank')) {
     $('settingOpenTargetBlank').addEventListener('change', e => {
@@ -1689,6 +1995,7 @@
       state.showClockSub = e.target.checked;
       save('showClockSub', state.showClockSub);
       updateClock();
+      updateSubTZUI();
     });
   }
 
@@ -1713,17 +2020,29 @@
   }
 
   function buildWallpaperGallery() {
+    const isCustomBg = state.bg === 'idb:custom';
+    const isBingBg = state.bg === 'bing:daily';
     let h = '';
+    h += '<div class="wp-thumb wp-bing'+(isBingBg?' active':'')+'" data-wp="bing:daily" title="Bing 每日一图"><span class="wp-bing-label">每日</span></div>';
     WALLPAPERS.forEach((wp,i) => {
       h += '<div class="wp-thumb'+(wp===state.bg?' active':'')+'" style="background-image:url('+wp+')" data-wp="'+wp+'" title="壁纸 '+(i+1)+'"></div>';
     });
-    h += '<div class="wp-upload" id="wpUploadBtn" title="上传自定义壁纸">+</div>';
+    h += '<div class="wp-upload'+(isCustomBg?' active':'')+'" id="wpUploadBtn" title="上传自定义壁纸（大图自动存入本地数据库）">+</div>';
     el.wpGallery.innerHTML = h;
 
     el.wpGallery.querySelectorAll('.wp-thumb').forEach(t => {
       t.addEventListener('click', () => { applyBg(t.dataset.wp); openSettings(); });
     });
     el.wpGallery.querySelector('#wpUploadBtn')?.addEventListener('click', () => $('wpUpload').click());
+
+    // Bing 磁贴预览：拉到当日图后回填背景
+    const bingTile = el.wpGallery.querySelector('.wp-bing');
+    if (bingTile) {
+      ensureBingDaily().then(url => {
+        bingTile.style.backgroundImage = 'url(' + url + ')';
+        bingTile.classList.add('has-img');
+      }).catch(() => {});
+    }
   }
 
   $('btnWallpaper')?.addEventListener('click', openSettings);
@@ -1738,11 +2057,28 @@
   });
 
   let toastTimer;
-  function showToast(msg) {
-    el.toast.textContent = msg;
+  function showToast(msg, opts) {
+    // 支持携带一个操作按钮（如删除后的「撤销」）；无按钮时与纯文本行为一致
+    el.toast.textContent = '';
+    const span = document.createElement('span');
+    span.className = 'toast-msg';
+    span.textContent = msg;
+    el.toast.appendChild(span);
+    if (opts && opts.actionLabel) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'toast-action';
+      btn.textContent = opts.actionLabel;
+      btn.addEventListener('click', () => {
+        clearTimeout(toastTimer);
+        el.toast.classList.remove('show');
+        if (typeof opts.onAction === 'function') opts.onAction();
+      });
+      el.toast.appendChild(btn);
+    }
     el.toast.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => el.toast.classList.remove('show'), 2000);
+    toastTimer = setTimeout(() => el.toast.classList.remove('show'), (opts && opts.duration) || 2000);
   }
 
   document.addEventListener('keydown', e => {
@@ -1935,6 +2271,14 @@
   NavIconCache.init().then(() => {
     hydrateCachedIcons();
   });
+
+  // ── 个人配置文件同步与首访提示 ──
+  if (window.ConfigFileSync) window.ConfigFileSync.init();
+  if (window.IS_FIRST_VISIT) {
+    setTimeout(() => showToast('已为您载入官方默认配置，右键图标可个性化调整'), 1200);
+  } else if (window.ConfigFileSync && window.ConfigFileSync.consumeSyncNotice()) {
+    setTimeout(() => showToast('已从个人配置文件同步最新配置'), 300);
+  }
 
   renderAll();
   initCustomSelects();

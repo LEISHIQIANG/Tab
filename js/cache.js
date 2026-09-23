@@ -6,7 +6,7 @@
   const NavIconCache = {
     DB_NAME: 'NavIconCacheDB',
     STORE_NAME: 'icons',
-    VERSION: 1,
+    VERSION: 2,
     MAX_ITEMS: 1000,
     TTL: 30 * 24 * 3600 * 1000,
     _memoryCache: new Map(),
@@ -23,6 +23,9 @@
             if (!db.objectStoreNames.contains(this.STORE_NAME)) {
               const store = db.createObjectStore(this.STORE_NAME, { keyPath: 'domain' });
               store.createIndex('lastUsed', 'lastUsed', { unique: false });
+            }
+            if (!db.objectStoreNames.contains('wallpapers')) {
+              db.createObjectStore('wallpapers', { keyPath: 'key' });
             }
           };
           req.onsuccess = () => resolve(req.result);
@@ -202,9 +205,86 @@
     }
     tryNext();
   }
+  // ── Wallpaper Store（大体积 dataURL 壁纸专用，避免撑爆 localStorage 配额）──
+  const WallpaperStore = {
+    STORE_NAME: 'wallpapers',
+    async get(key) {
+      try {
+        const db = await NavIconCache.getDB();
+        if (!db) return null;
+        return new Promise(resolve => {
+          const tx = db.transaction(this.STORE_NAME, 'readonly');
+          const req = tx.objectStore(this.STORE_NAME).get(key);
+          req.onsuccess = () => resolve(req.result ? req.result.dataUrl : null);
+          req.onerror = () => resolve(null);
+        });
+      } catch { return null; }
+    },
+    async set(key, dataUrl) {
+      if (!key || !dataUrl) return;
+      try {
+        const db = await NavIconCache.getDB();
+        if (!db) return;
+        const tx = db.transaction(this.STORE_NAME, 'readwrite');
+        tx.objectStore(this.STORE_NAME).put({ key, dataUrl, time: Date.now() });
+      } catch (e) {
+        console.warn('WallpaperStore set failed', e);
+      }
+    },
+    async clear() {
+      try {
+        const db = await NavIconCache.getDB();
+        if (!db) return;
+        const tx = db.transaction(this.STORE_NAME, 'readwrite');
+        tx.objectStore(this.STORE_NAME).clear();
+      } catch {}
+    }
+  };
+
+  // ── Bing 每日一图（官方 JSONP 接口 → 第三方直链兜底；纯图片地址无需 CORS）──
+  function tryLoadImage(url, timeoutMs) {
+    return new Promise((resolve, reject) => {
+      const probe = new Image();
+      const timer = setTimeout(() => reject(new Error('image timeout')), timeoutMs);
+      probe.onload = () => { clearTimeout(timer); resolve(url); };
+      probe.onerror = () => { clearTimeout(timer); reject(new Error('image failed')); };
+      probe.src = url;
+    });
+  }
+  function fetchBingDaily() {
+    return new Promise((resolve, reject) => {
+      const cbName = '_bingJsonp' + Date.now();
+      const script = document.createElement('script');
+      let settled = false;
+      const timer = setTimeout(() => finish(reject, new Error('jsonp timeout')), 6000);
+      function finish(fn, val) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        try { delete window[cbName]; } catch {}
+        script.remove();
+        fn(val);
+      }
+      window[cbName] = data => {
+        try {
+          const img = data && data.images && data.images[0];
+          if (img && img.url) finish(resolve, 'https://cn.bing.com' + img.url);
+          else finish(reject, new Error('empty payload'));
+        } catch (e) { finish(reject, e); }
+      };
+      script.onerror = () => finish(reject, new Error('jsonp error'));
+      script.src = 'https://cn.bing.com/HPImageArchive.aspx?format=js&idx=0&n=1&callback=' + cbName;
+      document.head.appendChild(script);
+    }).catch(() =>
+      tryLoadImage('https://bing.img.run/uhd.php', 6000)
+        .catch(() => tryLoadImage('https://api.dujin.org/bing/uhd.php', 6000))
+    );
+  }
 
 
   // Expose to window
   window.NavIconCache = NavIconCache;
+  window.WallpaperStore = WallpaperStore;
+  window.fetchBingDaily = fetchBingDaily;
   window.fetchAndCacheOnlineFavicon = fetchAndCacheOnlineFavicon;
 })();

@@ -2546,6 +2546,14 @@
     border-color: rgba(224, 75, 89, 0.35);
     background: rgba(224, 75, 89, 0.08);
   }
+  .cfg-file-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .cfg-file-card {
+    margin-top: 6px;
+  }
 
   /* ── Settings Single-Row Footer Actions ── */
   .settings-actions {
@@ -3085,5 +3093,69 @@
     #statusIspWrap, #statusIspDivider { display: none; }
     .bottom-status-bar { bottom: 8px; max-width: calc(100vw - 24px); }
     .status-bar-inner { font-size: 10px; height: 26px; padding: 0 9px; }
+  }
+
+  /* ═══════════════════════════════════════
+     Toast Action Button（撤销等）
+     ═══════════════════════════════════════ */
+  .toast { display: flex; align-items: center; justify-content: center; }
+  .toast-action {
+    pointer-events: auto;
+    margin-left: 12px;
+    border: none; background: var(--accent); color: #fff;
+    font-size: 12px; font-weight: 700; padding: 3px 12px; border-radius: 999px;
+    cursor: pointer; transition: filter 0.15s, transform 0.15s;
+    font-family: inherit;
+  }
+  .toast-action:hover { filter: brightness(1.12); }
+  .toast-action:active { transform: scale(0.95); }
+
+  /* ═══════════════════════════════════════
+     Search Suggest — engine search fallback row
+     ═══════════════════════════════════════ */
+  .suggest-search {
+    margin-top: 3px;
+    padding-top: calc(var(--suggest-item-pad-y) + 2px);
+    border-top: 1px solid var(--divider);
+    border-radius: 0 0 8px 8px;
+  }
+  .suggest-search .suggest-icon { background: transparent; }
+
+  /* ═══════════════════════════════════════
+     Context Menu — category section（编辑/删除分类）
+     ═══════════════════════════════════════ */
+  .context-menu .cm-section-cat { display: none; }
+  .context-menu.mode-blank.has-cat .cm-section-cat { display: block; }
+
+  /* ═══════════════════════════════════════
+     Manage Category Modal — icon grid
+     ═══════════════════════════════════════ */
+  .cat-icon-grid { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 12px; }
+  .cat-icon-cell {
+    width: 42px; height: 42px; border-radius: 12px;
+    border: 1.5px solid var(--glass-border); background: rgba(255,255,255,0.04);
+    color: var(--text-secondary); cursor: pointer; display: flex; align-items: center; justify-content: center;
+    padding: 0; transition: all 0.15s;
+  }
+  .cat-icon-cell:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
+  .cat-icon-cell.selected {
+    border-color: var(--accent); color: var(--accent); background: var(--accent-light);
+    box-shadow: 0 0 0 2px rgba(79, 110, 246, 0.16);
+  }
+  .cat-icon-cell .cat-svg { width: 20px; height: 20px; }
+  [data-theme="dark"] .cat-icon-cell { background: rgba(255,255,255,0.05); }
+  .modal-btn-danger-text { color: #e85d75 !important; }
+  .modal-btn-danger-text:hover { border-color: rgba(232,93,117,0.4) !important; background: rgba(232,93,117,0.08) !important; }
+
+  /* ═══════════════════════════════════════
+     Wallpaper Gallery — Bing daily tile
+     ═══════════════════════════════════════ */
+  .wp-bing { display: flex; align-items: flex-end; background-size: cover; background-position: center; }
+  .wp-bing-label {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    font-size: 10px; font-weight: 700; color: #fff; text-align: center;
+    padding: 3px 0 2px; letter-spacing: 0.1em; pointer-events: none;
+    background: linear-gradient(transparent, rgba(0, 0, 0, 0.6));
+    text-shadow: 0 1px 2px rgba(0,0,0,0.5);
   }
 

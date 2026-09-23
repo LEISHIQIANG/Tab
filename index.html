@@ -8,12 +8,12 @@
 <link rel="icon" type="image/png" sizes="32x32" href="assets/site-logo-32.png">
 <link rel="apple-touch-icon" sizes="180x180" href="assets/site-logo-180.png">
 <link rel="preload" as="image" href="assets/site-logo-180.png">
-<link rel="preload" as="script" href="bookmarks.js?v=20260914_9">
-<link rel="preload" as="script" href="js/config.js?v=20260914_9">
-<link rel="preload" as="script" href="js/cache.js?v=20260914_9">
-<link rel="preload" as="script" href="js/state.js?v=20260914_9">
-<link rel="preload" as="script" href="js/app.js?v=20260914_9">
-<link rel="stylesheet" href="css/style.css?v=20260914_9">
+<link rel="preload" as="script" href="bookmarks.js?v=20260923_3">
+<link rel="preload" as="script" href="js/config.js?v=20260923_3">
+<link rel="preload" as="script" href="js/cache.js?v=20260923_3">
+<link rel="preload" as="script" href="js/state.js?v=20260923_3">
+<link rel="preload" as="script" href="js/app.js?v=20260923_3">
+<link rel="stylesheet" href="css/style.css?v=20260923_3">
 </head>
 <body>
 
@@ -158,6 +158,16 @@
       删除网站
     </button>
   </div>
+  <div class="cm-section cm-section-cat">
+    <button class="cm-item" data-action="manage-cat">
+      <svg viewBox="0 0 24 24" class="cm-svg"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+      编辑分类（重命名/图标）
+    </button>
+    <button class="cm-item danger" data-action="delete-cat">
+      <svg viewBox="0 0 24 24" class="cm-svg"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+      删除分类
+    </button>
+  </div>
   <div class="cm-section cm-section-blank">
     <button class="cm-item" data-action="add-site">
       <svg viewBox="0 0 24 24" class="cm-svg"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -221,6 +231,22 @@
   </div>
 </div>
 
+<!-- ═══ Manage Category Modal ═══ -->
+<div class="modal-overlay" id="catManageOverlay">
+  <div class="modal">
+    <h3>编辑分类</h3>
+    <label>分类名称</label>
+    <input type="text" id="catManageName" placeholder="例如：学习工具">
+    <label>分类图标</label>
+    <div class="cat-icon-grid" id="catManageIconGrid"></div>
+    <div class="modal-actions">
+      <button class="modal-btn modal-btn-cancel modal-btn-danger-text" id="catManageDelete">删除分类</button>
+      <button class="modal-btn modal-btn-cancel" id="catManageCancel">取消</button>
+      <button class="modal-btn modal-btn-primary" id="catManageSave">保存</button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ Settings Panel ═══ -->
 <div class="settings-overlay" id="settingsOverlay">
   <div class="settings-panel">
@@ -231,6 +257,15 @@
         <!-- ═══ Left Column: Interactions, Layout & Precision Spacing ═══ -->
         <div class="settings-col">
           <div class="setting-section-header"><svg class="sec-svg" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg><span>功能偏好</span></div>
+
+          <div class="setting-group">
+            <div class="setting-label"><span>外观主题</span></div>
+            <select class="settings-select" id="selectTheme">
+              <option value="auto">跟随系统（自动切换）</option>
+              <option value="light">浅色</option>
+              <option value="dark">深色</option>
+            </select>
+          </div>
 
           <div class="setting-toggle-row">
             <div class="setting-toggle-info">
@@ -274,6 +309,22 @@
               <input type="checkbox" id="settingClockSub">
               <span class="switch-slider"></span>
             </label>
+          </div>
+
+          <div class="setting-group" id="groupSubTZ">
+            <div class="setting-label"><span>副时区城市</span></div>
+            <select class="settings-select" id="selectClockSubTZ">
+              <option value="auto">自动（智能判断）</option>
+              <option value="beijing">北京</option>
+              <option value="losangeles">洛杉矶</option>
+              <option value="newyork">纽约</option>
+              <option value="london">伦敦</option>
+              <option value="paris">巴黎</option>
+              <option value="moscow">莫斯科</option>
+              <option value="dubai">迪拜</option>
+              <option value="tokyo">东京</option>
+              <option value="sydney">悉尼</option>
+            </select>
           </div>
 
           <div class="setting-toggle-row">
@@ -527,6 +578,21 @@
               <button type="button" class="btn-subtle" id="btnResetOfficialBm">恢复官方最新书签库</button>
             </div>
           </div>
+
+          <div class="setting-info-card cfg-file-card">
+            <div class="setting-info-meta">
+              <span class="sync-badge" id="cfgFileBadge">未关联</span>
+              <span class="sync-status" id="cfgFileSyncTime">配置仅保存在本浏览器</span>
+            </div>
+            <div class="setting-info-desc" id="cfgFileDesc">将全部个性化设置与书签（含图标排序、增删改、自建分类）保存为电脑上的一个 JSON 配置文件，所有修改自动写回。不同浏览器关联同一个文件即可共用一套个人配置；把文件放进 OneDrive / 坚果云等同步文件夹，还能实现多台设备共享。</div>
+            <div class="cfg-file-actions" style="margin-top:8px;">
+              <button type="button" class="btn-subtle" id="cfgLinkFile">关联已有配置文件</button>
+              <button type="button" class="btn-subtle" id="cfgCreateFile">新建配置文件</button>
+              <button type="button" class="btn-subtle" id="cfgSyncNow" style="display:none">立即同步</button>
+              <button type="button" class="btn-subtle" id="cfgRestoreBackup" style="display:none" title="恢复到最近一次自动备份的配置快照">恢复上次备份</button>
+              <button type="button" class="btn-subtle" id="cfgUnlink" style="display:none">取消关联</button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -545,10 +611,11 @@
 <!-- ═══ Toast ═══ -->
 <div class="toast" id="toast"></div>
 
-<script src="bookmarks.js?v=20260914_9"></script>
-<script src="js/config.js?v=20260914_9"></script>
-<script src="js/cache.js?v=20260914_9"></script>
-<script src="js/state.js?v=20260914_9"></script>
-<script src="js/app.js?v=20260914_9"></script>
+<script src="bookmarks.js?v=20260923_3"></script>
+<script src="js/config.js?v=20260923_3"></script>
+<script src="js/cache.js?v=20260923_3"></script>
+<script src="js/state.js?v=20260923_3"></script>
+<script src="js/config-sync.js?v=20260923_3"></script>
+<script src="js/app.js?v=20260923_3"></script>
 </body>
 </html>
