@@ -148,6 +148,7 @@
 
   // Load all settings
   state.theme  = load('theme', 'light');
+  state.accent = load('accent', 'indigo');
   // 主题为「跟随系统」时，按当前系统偏好解析出实际主题（影响遮罩等主题相关默认值）
   const sysDark = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
   const effectiveTheme = (state.theme === 'auto') ? (sysDark ? 'dark' : 'light') : state.theme;

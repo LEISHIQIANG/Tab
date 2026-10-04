@@ -8,12 +8,12 @@
 <link rel="icon" type="image/png" sizes="32x32" href="assets/site-logo-32.png">
 <link rel="apple-touch-icon" sizes="180x180" href="assets/site-logo-180.png">
 <link rel="preload" as="image" href="assets/site-logo-180.png">
-<link rel="preload" as="script" href="bookmarks.js?v=20260923_3">
-<link rel="preload" as="script" href="js/config.js?v=20260923_3">
-<link rel="preload" as="script" href="js/cache.js?v=20260923_3">
-<link rel="preload" as="script" href="js/state.js?v=20260923_3">
-<link rel="preload" as="script" href="js/app.js?v=20260923_3">
-<link rel="stylesheet" href="css/style.css?v=20260923_3">
+<link rel="preload" as="script" href="bookmarks.js?v=20261004_7">
+<link rel="preload" as="script" href="js/config.js?v=20261004_7">
+<link rel="preload" as="script" href="js/cache.js?v=20261004_7">
+<link rel="preload" as="script" href="js/state.js?v=20261004_7">
+<link rel="preload" as="script" href="js/app.js?v=20261004_7">
+<link rel="stylesheet" href="css/style.css?v=20261004_7">
 </head>
 <body>
 
@@ -33,7 +33,7 @@
     <div class="site-brand" id="siteBrand" title="轻航导航">
       <img class="site-logo" src="assets/site-logo-32.png" alt="Logo">
       <span class="site-name">轻航</span>
-      <span class="greeting-badge" id="greeting">你好</span>
+      <span class="greeting-badge" id="greeting"><span class="greeting-icon" id="greetingIcon" aria-hidden="true"></span><span class="greeting-text" id="greetingText">你好</span></span>
     </div>
   </div>
   <div class="top-right">
@@ -265,6 +265,21 @@
               <option value="light">浅色</option>
               <option value="dark">深色</option>
             </select>
+          </div>
+
+          <div class="setting-group">
+            <div class="setting-label"><span>主题色</span></div>
+            <div class="accent-picker" id="accentPicker" role="radiogroup" aria-label="主题色">
+              <button type="button" class="accent-swatch" data-accent="indigo" title="靛蓝" style="--sw:#4f46e5" aria-label="靛蓝"></button>
+              <button type="button" class="accent-swatch" data-accent="blue" title="湛蓝" style="--sw:#2563eb" aria-label="湛蓝"></button>
+              <button type="button" class="accent-swatch" data-accent="ocean" title="海洋蓝" style="--sw:#0284c7" aria-label="海洋蓝"></button>
+              <button type="button" class="accent-swatch" data-accent="teal" title="青碧" style="--sw:#0d9488" aria-label="青碧"></button>
+              <button type="button" class="accent-swatch" data-accent="emerald" title="翡翠绿" style="--sw:#059669" aria-label="翡翠绿"></button>
+              <button type="button" class="accent-swatch" data-accent="amber" title="琥珀橙" style="--sw:#d97706" aria-label="琥珀橙"></button>
+              <button type="button" class="accent-swatch" data-accent="rose" title="玫瑰红" style="--sw:#e11d48" aria-label="玫瑰红"></button>
+              <button type="button" class="accent-swatch" data-accent="violet" title="星紫" style="--sw:#7c3aed" aria-label="星紫"></button>
+            </div>
+            <div class="accent-current">当前主题色：<b id="accentCurrentName">靛蓝</b></div>
           </div>
 
           <div class="setting-toggle-row">
@@ -611,11 +626,11 @@
 <!-- ═══ Toast ═══ -->
 <div class="toast" id="toast"></div>
 
-<script src="bookmarks.js?v=20260923_3"></script>
-<script src="js/config.js?v=20260923_3"></script>
-<script src="js/cache.js?v=20260923_3"></script>
-<script src="js/state.js?v=20260923_3"></script>
-<script src="js/config-sync.js?v=20260923_3"></script>
-<script src="js/app.js?v=20260923_3"></script>
+<script src="bookmarks.js?v=20261004_7"></script>
+<script src="js/config.js?v=20261004_7"></script>
+<script src="js/cache.js?v=20261004_7"></script>
+<script src="js/state.js?v=20261004_7"></script>
+<script src="js/config-sync.js?v=20261004_7"></script>
+<script src="js/app.js?v=20261004_7"></script>
 </body>
 </html>

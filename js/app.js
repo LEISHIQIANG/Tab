@@ -52,6 +52,21 @@
   else if (mqlDark.addListener) mqlDark.addListener(onSystemThemeChange);
   applyTheme(state.theme);
 
+  // ── 主题色（6 套预设色板，驱动全站强调色与搜索框渐变描边）──
+  const ACCENT_LIST = ['indigo', 'blue', 'ocean', 'teal', 'emerald', 'amber', 'rose', 'violet'];
+  const ACCENT_NAMES = { indigo: '靛蓝', blue: '湛蓝', ocean: '海洋蓝', teal: '青碧', emerald: '翡翠绿', amber: '琥珀橙', rose: '玫瑰红', violet: '星紫' };
+  function applyAccent(a) {
+    state.accent = ACCENT_LIST.includes(a) ? a : 'indigo';
+    document.documentElement.setAttribute('data-accent', state.accent);
+    document.querySelectorAll('.accent-swatch').forEach(sw => {
+      sw.classList.toggle('active', sw.dataset.accent === state.accent);
+      sw.setAttribute('aria-pressed', sw.dataset.accent === state.accent ? 'true' : 'false');
+    });
+    const nameEl = document.getElementById('accentCurrentName');
+    if (nameEl) nameEl.textContent = ACCENT_NAMES[state.accent];
+  }
+  applyAccent(state.accent);
+
   function applyInvertClockColor(invert) {
     state.invertClockColor = !!invert;
     if (typeof document !== 'undefined' && document.body) {
@@ -565,15 +580,38 @@
     }
 
     const hr = n.getHours();
-    if (el.greeting) {
-      if (hr >= 5 && hr < 9) el.greeting.textContent = '清晨好 ☕';
-      else if (hr >= 9 && hr < 12) el.greeting.textContent = '上午好 ☀️';
-      else if (hr >= 12 && hr < 14) el.greeting.textContent = '中午好 🍴';
-      else if (hr >= 14 && hr < 19) el.greeting.textContent = '下午好 🌤️';
-      else if (hr >= 19 && hr < 24) el.greeting.textContent = '晚上好 🌙';
-      else el.greeting.textContent = '夜深了 🌌';
-    }
+    applyGreeting(hr);
   }
+
+  // ── 问候徽章：线性 SVG 时段图标 + 时段配色，仅在时段变化时写 DOM ──
+  const GREETING_ICON_SUNRISE = '<svg viewBox="0 0 24 24"><path d="M12 2v8"/><path d="m4.93 10.93 1.41 1.41"/><path d="M2 18h2"/><path d="M20 18h2"/><path d="m19.07 10.93-1.41 1.41"/><path d="M22 22H2"/><path d="m8 6 4-4 4 4"/><path d="M16 18a4 4 0 0 0-8 0"/></svg>';
+  const GREETING_ICON_SUN = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>';
+  const GREETING_ICON_CLOUDSUN = '<svg viewBox="0 0 24 24"><path d="M12 2v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="M20 12h2"/><path d="m19.07 4.93-1.41 1.41"/><path d="M15.947 12.65a4 4 0 0 0-5.925-4.128"/><path d="M13 22H7a5 5 0 1 1 4.9-6H13a3 3 0 0 1 0 6Z"/></svg>';
+  const GREETING_ICON_MOON = '<svg viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>';
+  const GREETING_ICON_MOONSTAR = '<svg viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/><path d="M20 3v4"/><path d="M22 5h-4"/></svg>';
+  const GREETING_PERIODS = [
+    { min: 5,  max: 8,  text: '清晨好', tint: 't-dusk',  icon: GREETING_ICON_SUNRISE },
+    { min: 9,  max: 11, text: '上午好', tint: 't-day',   icon: GREETING_ICON_SUN },
+    { min: 12, max: 13, text: '中午好', tint: 't-day',   icon: GREETING_ICON_SUN },
+    { min: 14, max: 18, text: '下午好', tint: 't-dusk',  icon: GREETING_ICON_CLOUDSUN },
+    { min: 19, max: 23, text: '晚上好', tint: 't-night', icon: GREETING_ICON_MOON },
+    { min: 0,  max: 4,  text: '夜深了', tint: 't-night', icon: GREETING_ICON_MOONSTAR }
+  ];
+  let _lastGreetingText = '';
+  function applyGreeting(hr) {
+    if (!el.greeting) return;
+    const period = GREETING_PERIODS.find(p => hr >= p.min && hr <= p.max) || GREETING_PERIODS[5];
+    if (period.text === _lastGreetingText) return;
+    _lastGreetingText = period.text;
+    const txt = document.getElementById('greetingText');
+    const ico = document.getElementById('greetingIcon');
+    if (!txt || !ico) { el.greeting.textContent = period.text; return; }
+    txt.textContent = period.text;
+    ico.innerHTML = period.icon;
+    el.greeting.classList.remove('t-day', 't-dusk', 't-night');
+    el.greeting.classList.add(period.tint);
+  }
+
   updateClock(); setInterval(updateClock, 1000);
 
   // ── Search Engine ──
@@ -1475,20 +1513,32 @@
               NavIconCache.delete(domain).then(() => {
                 const wrap = t.querySelector('.icon-img-wrap');
                 if (wrap) {
+                  // 抓取期间先回到文字占位,避免残留破损/旧图
                   let img = wrap.querySelector('img.site-icon');
-                  if (!img) {
-                    img = document.createElement('img');
-                    img.className = 'site-icon';
-                    wrap.prepend(img);
-                  }
-                  fetchAndCacheOnlineFavicon(domain, (freshUrl) => {
+                  if (img) img.style.display = 'none';
+                  const fb = wrap.querySelector('.icon-fallback');
+                  if (fb) fb.style.display = 'flex';
+                }
+                fetchAndCacheOnlineFavicon(domain, (freshUrl) => {
+                  if (wrap) {
+                    let img = wrap.querySelector('img.site-icon');
+                    if (!img) {
+                      img = document.createElement('img');
+                      img.className = 'site-icon loaded';
+                      img.loading = 'lazy';
+                      img.decoding = 'async';
+                      wrap.prepend(img);
+                    }
                     img.src = freshUrl;
                     img.style.display = 'block';
+                    img.classList.add('loaded');
                     const fb = wrap.querySelector('.icon-fallback');
                     if (fb) fb.style.display = 'none';
-                    showToast('图标已刷新并更新缓存');
-                  });
-                }
+                  }
+                  showToast('图标已刷新并更新缓存');
+                }, () => {
+                  showToast('未能获取到该网站图标，已显示文字占位');
+                }, { force: true });
               });
             }
             break;
@@ -1947,6 +1997,16 @@
     $('selectTheme').addEventListener('change', e => {
       applyTheme(e.target.value);
       save('theme', state.theme);
+    });
+  }
+
+  if ($('accentPicker')) {
+    $('accentPicker').addEventListener('click', e => {
+      const sw = e.target.closest('.accent-swatch');
+      if (!sw || sw.dataset.accent === state.accent) return;
+      applyAccent(sw.dataset.accent);
+      save('accent', state.accent);
+      showToast('主题色：' + (sw.title || state.accent));
     });
   }
 
