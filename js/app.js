@@ -1076,11 +1076,15 @@
     }
 
     const colCounts = new Array(cols).fill(0);
+    // 组团内每行图标数（与 applyLayout 的 iconCols 一致），用于把图标数换算成行数
+    const perRow = Math.min(6, Math.max(1, Number(state.cols) || 4));
     clusters.forEach(cluster => {
       const minIdx = colCounts.indexOf(Math.min(...colCounts));
       columns[minIdx].appendChild(cluster);
       const iconCount = cluster.querySelectorAll('.icon-item').length;
-      colCounts[minIdx] += cluster.classList.contains('collapsed') ? 1 : (iconCount === 0 ? 1 : iconCount);
+      // 以图标行节距为单元计高：标题栏+组团间距恰好占 1 个单元，
+      // 展开组团占「行数+1」个单元，空分类占 2 个（标题栏 + 占位行），折叠占 1 个
+      colCounts[minIdx] += cluster.classList.contains('collapsed') ? 1 : (iconCount === 0 ? 2 : Math.ceil(iconCount / perRow) + 1);
     });
 
     const fragment = document.createDocumentFragment();

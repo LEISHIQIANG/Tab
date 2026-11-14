@@ -82,6 +82,14 @@
     --grid-row-gap: 12px;
     --cluster-padding: 19px;
     --cluster-gap: 14px;
+    /* ── 栅格对齐系统 ──
+       一行图标的节距(--icon-pitch) = 图标格高 + 行距；
+       标题栏高度 = 节距 - 组团间距 - 组团上下内边距 - 卡片上下边框(2px)。
+       保证每个组团(含折叠态)恰好占据整数个行单位，
+       多列瀑布流中所有图标行都落在同一水平网格上。 */
+    --icon-cell-h: calc(var(--icon-size, 40px) + var(--icon-font-size, 11px) * 1.35 + 25px);
+    --icon-pitch: calc(var(--icon-cell-h) + var(--grid-row-gap, 12px));
+    --cat-header-h: calc(var(--icon-pitch) - var(--cluster-gap, 14px) - 2 * var(--cluster-padding, 19px) - 2px);
     --select-arrow: url("data:image/svg+xml;utf8,<svg fill='none' stroke='%235a5a75' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'><polyline points='6 9 12 15 18 9'></polyline></svg>");
     --clock-color: #ffffff;
     --clock-sub-color: rgba(255, 255, 255, 0.88);
@@ -965,9 +973,6 @@
   .cat-cluster.collapsed .icon-item,
   .cat-cluster.collapsed .empty-cat-placeholder {
     display: none !important;
-  }
-  .cat-cluster.collapsed {
-    padding-bottom: 8px !important;
   }
   .cat-cluster.dragging-cat {
     opacity: 0.4;
@@ -2125,6 +2130,30 @@
     display: none !important;
   }
 
+  /* ── 栅格对齐应用（桌面端瀑布流） ──
+     标题栏 + 组团上下内边距 + 组团间距 = 恰好一行图标的节距，
+     图标格与空分类占位固定为同一行高，使任何排列下图标行都水平对齐。 */
+  @media (min-width: 769px) {
+    .cat-header {
+      /* 内容下限 37px（26px 折叠按钮 + 内边距 10 + 边框 1）；
+         若公式值更小（极端滑杆组合），差值用负外边距吸收，
+         保证标题栏轨道高度始终精确等于 --cat-header-h，等式不破 */
+      height: max(37px, var(--cat-header-h));
+      margin: 0 0 min(0px, calc(var(--cat-header-h) - 37px)) !important;
+    }
+    .icon-item,
+    .icon-item-add {
+      height: var(--icon-cell-h);
+    }
+    .empty-cat-placeholder {
+      height: var(--icon-cell-h);
+      margin: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+  }
+
   /* ── Settings Panel & Modals ── */
   .context-menu, .modal, .settings-panel, .custom-select-dropdown, .toast {
     border: 1px solid var(--glass-border);
@@ -2395,6 +2424,11 @@
   }
   body.hide-icon-titles .icon-img-wrap {
     margin-bottom: 0 !important;
+  }
+  /* 纯图标模式：格子保持统一行高，图标在格内垂直居中，节距与标题栏等式不受影响 */
+  body.hide-icon-titles .icon-item {
+    justify-content: center;
+    gap: 0;
   }
 
   /* ── Settings Sections & Toggles ── */
